@@ -1,0 +1,83 @@
+# Feature definitions.
+#
+# Every feature listed here is computed by src/tdwm/indicators.py using
+# strictly backward-looking (causal) windows. Adding a feature requires
+# a corresponding test in tests/test_indicators_causal.py.
+
+returns:
+  - name: ret_1
+    kind: simple_return
+    horizon: 1
+  - name: logret_1
+    kind: log_return
+    horizon: 1
+  - name: ret_5
+    kind: simple_return
+    horizon: 5
+  - name: logret_20
+    kind: log_return
+    horizon: 20
+
+volatility:
+  - name: rv_5
+    kind: realized_vol        # stdev of log returns
+    window: 5
+  - name: rv_20
+    kind: realized_vol
+    window: 20
+  - name: rv_60
+    kind: realized_vol
+    window: 60
+  - name: atr_14
+    kind: atr
+    window: 14
+
+momentum:
+  - name: rsi_14
+    kind: rsi
+    window: 14
+  - name: macd
+    kind: macd
+    fast: 12
+    slow: 26
+    signal: 9                 # emits macd, macd_signal, macd_hist
+  - name: mom_10
+    kind: momentum
+    window: 10
+
+volume:
+  - name: obv
+    kind: obv
+  - name: vol_z_20
+    kind: volume_zscore
+    window: 20
+
+bands:
+  - name: bb_20
+    kind: bollinger
+    window: 20
+    k: 2                      # emits bb_mid, bb_up, bb_lo, bb_pctb
+
+# What goes into the "state" vector of a trajectory, in order.
+trajectory_state:
+  - open
+  - high
+  - low
+  - close_adj
+  - volume
+  - logret_1
+  - rv_20
+  - rsi_14
+  - macd
+  - macd_signal
+  - macd_hist
+  - atr_14
+  - bb_pctb
+  - obv
+  - vol_z_20
+  # macro context (joined by date)
+  - spy_logret_1
+  - vix_level
+  - tlt_logret_1
+  - dxy_logret_1
+  - sector_logret_1           # sector ETF matching the symbol's sector

@@ -1,0 +1,20 @@
+# Time-based train/val/test splits. All cutoffs are inclusive.
+# Trajectories are assigned to the split of their LAST timestamp, which
+# means a 60-day window ending in val is "val" even if it starts in train.
+# For strict non-overlap, the pipeline drops any trajectory that straddles
+# a split boundary (configurable below).
+
+train:
+  end: 2023-12-31
+
+val:
+  start: 2024-01-01
+  end:   2024-12-31
+
+test:
+  start: 2025-01-01
+  end:   null   # open-ended → latest available
+
+# Drop trajectories that cross a split boundary.
+# Setting this to false is only recommended for exploratory analysis.
+strict_no_crossing: true

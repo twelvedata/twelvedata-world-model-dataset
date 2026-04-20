@@ -1,0 +1,49 @@
+{
+  "version": "0.1.0",
+  "bars": {
+    "core_columns": [
+      {"name": "datetime",  "type": "timestamp[tz=America/New_York]"},
+      {"name": "symbol",    "type": "string"},
+      {"name": "timeframe", "type": "string", "values": ["1day", "1h", "1min"]},
+      {"name": "open",      "type": "float64"},
+      {"name": "high",      "type": "float64"},
+      {"name": "low",       "type": "float64"},
+      {"name": "close",     "type": "float64"},
+      {"name": "volume",    "type": "float64"},
+      {"name": "close_adj", "type": "float64", "note": "split/dividend-adjusted"}
+    ],
+    "indicator_columns": [
+      "ret_1", "logret_1", "ret_5", "logret_20",
+      "rv_5", "rv_20", "rv_60", "atr_14",
+      "rsi_14", "macd", "macd_signal", "macd_hist", "mom_10",
+      "obv", "vol_z_20",
+      "bb_mid", "bb_up", "bb_lo", "bb_pctb"
+    ],
+    "macro_columns": [
+      "spy_logret_1", "vix_level", "tlt_logret_1", "dxy_logret_1", "sector_logret_1"
+    ]
+  },
+  "text": {
+    "fields": [
+      {"name": "symbol",    "type": "string"},
+      {"name": "timeframe", "type": "string"},
+      {"name": "as_of",     "type": "string", "format": "iso-8601"},
+      {"name": "prompt",    "type": "string", "invariant": "no information after as_of"},
+      {"name": "label",     "type": "string", "invariant": "describes next-step outcome only"},
+      {"name": "meta",      "type": "object"}
+    ]
+  },
+  "trajectories": {
+    "fields": [
+      {"name": "trajectory_id", "type": "string"},
+      {"name": "symbol",        "type": "string"},
+      {"name": "timeframe",     "type": "string"},
+      {"name": "feature_names", "type": "array<string>"},
+      {"name": "timestamps",    "type": "array<string>", "note": "ISO-8601, length T"},
+      {"name": "states",        "type": "array<array<float>>", "shape": "[T, F]"},
+      {"name": "next_states",   "type": "array<array<float>>", "shape": "[T, F]"},
+      {"name": "rewards_logret","type": "array<float>|null", "shape": "[T]"},
+      {"name": "split",         "type": "string", "values": ["train", "val", "test"]}
+    ]
+  }
+}

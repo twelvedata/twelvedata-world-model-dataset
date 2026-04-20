@@ -1,0 +1,31 @@
+# Data
+data/
+!data/.gitkeep
+*.parquet
+*.jsonl
+*.png
+*.jpg
+*.jpeg
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+
+# Keep example outputs in examples/
+!examples/*.jsonl
+!examples/*.png

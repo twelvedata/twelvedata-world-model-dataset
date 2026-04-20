@@ -1,0 +1,38 @@
+# Timeframe configuration.
+#
+# `history_years` is the amount of history the backfill will request for
+# each timeframe. Intraday intervals are capped because Twelve Data's
+# historical depth on sub-daily bars is lower than on daily bars.
+#
+# `trajectory_windows` controls the rolling-window sizes emitted for
+# each timeframe. Stride equal to window makes the windows
+# non-overlapping (cheaper, fewer correlated samples); smaller stride
+# gives more samples but higher correlation.
+
+timeframes:
+  - interval: 1day
+    enabled: true
+    history_years: 20
+    session: regular
+    trajectory_windows:
+      - { size: 30, stride: 5 }
+      - { size: 60, stride: 10 }
+      - { size: 120, stride: 20 }
+
+  - interval: 1h
+    enabled: true
+    history_years: 5
+    session: regular
+    trajectory_windows:
+      - { size: 24, stride: 6 }     # ~3.5 trading days
+      - { size: 120, stride: 24 }   # ~3 trading weeks
+
+  - interval: 1min
+    enabled: true
+    history_years: 1
+    session: regular
+    trajectory_windows:
+      - { size: 390, stride: 195 }  # one US session, half-session stride
+      - { size: 1950, stride: 390 } # one week, one-session stride
+
+timezone: America/New_York

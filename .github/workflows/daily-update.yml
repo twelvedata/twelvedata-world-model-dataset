@@ -1,0 +1,81 @@
+name: Daily dataset update
+
+on:
+  # ~06:00 UTC = 02:00 ET — well after US close and any late prints.
+  schedule:
+    - cron: '0 6 * * 2-6'
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Comma-separated override (e.g. AAPL,MSFT)"
+        required: false
+      timeframes:
+        description: "Comma-separated override (e.g. 1day,1h)"
+        required: false
+
+concurrency:
+  group: daily-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run leakage validator (fast)
+        run: python scripts/validate_no_leakage.py
+
+      - name: Daily update
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          EXTRA=""
+          if [ -n "${{ github.event.inputs.symbols }}" ]; then
+            EXTRA="$EXTRA --symbols ${{ github.event.inputs.symbols }}"
+          fi
+          if [ -n "${{ github.event.inputs.timeframes }}" ]; then
+            EXTRA="$EXTRA --timeframes ${{ github.event.inputs.timeframes }}"
+          fi
+          python scripts/update_daily.py $EXTRA
+
+      - name: Build and push release
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python scripts/build_release.py
+
+      - name: Upload parquet artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-state
+          path: |
+            data/_state.json
+            data/release/**
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Commit & push state (for inspection)
+        if: ${{ github.event_name == 'schedule' && success() }}
+        run: |
+          git config user.name "twelvedata-bot"
+          git config user.email "bot@twelvedata.com"
+          if [ -n "$(git status --porcelain data/_state.json)" ]; then
+            git add data/_state.json
+            git commit -m "chore: daily state $(date -u +'%Y-%m-%d')"
+            git push
+          fi

@@ -1,0 +1,93 @@
+# Symbols universe for the Twelve Data world-model dataset.
+#
+# "equities" is the primary trainable universe (~50 large-caps spread
+# across sectors). "macro" are context rows joined onto every equity row
+# via src/tdwm/enrich.py. Macro tickers are NOT rolled into trajectories
+# as separate episodes by default.
+
+equities:
+  # Technology
+  - AAPL
+  - MSFT
+  - NVDA
+  - GOOGL
+  - META
+  - AMZN
+  - AVGO
+  - ORCL
+  - ADBE
+  - CRM
+  - AMD
+  - CSCO
+  # Financials
+  - JPM
+  - BAC
+  - WFC
+  - GS
+  - MS
+  - BLK
+  - V
+  - MA
+  # Healthcare
+  - JNJ
+  - UNH
+  - LLY
+  - PFE
+  - MRK
+  - ABBV
+  - TMO
+  # Consumer
+  - WMT
+  - HD
+  - COST
+  - MCD
+  - NKE
+  - SBUX
+  - DIS
+  # Industrials / Energy / Materials
+  - CAT
+  - BA
+  - GE
+  - RTX
+  - XOM
+  - CVX
+  - COP
+  - LIN
+  # Communication / Other
+  - NFLX
+  - TMUS
+  - T
+  - VZ
+  # Extra rotation
+  - TSLA
+  - BRK.B
+  - PG
+  - KO
+  - PEP
+
+macro:
+  # Broad market & vol
+  - SPY        # S&P 500 ETF
+  - QQQ        # Nasdaq 100 ETF
+  - IWM        # Russell 2000 ETF
+  - VIXY       # VIX proxy (ProShares VIX Short-Term Futures ETF)
+  # Rates / bonds (ETF proxies are easier to fetch consistently)
+  - TLT        # 20+ yr Treasury
+  - IEF        # 7-10 yr Treasury
+  - SHY        # 1-3 yr Treasury
+  # FX / commodities proxies
+  - UUP        # US Dollar index ETF (DXY proxy)
+  - XAU/USD    # Gold (spot)
+  - XBR/USD    # Brent crude (spot)
+  # Sector ETFs (SPDR)
+  - XLK        # Tech
+  - XLF        # Financials
+  - XLV        # Healthcare
+  - XLY        # Consumer discretionary
+  - XLP        # Consumer staples
+  - XLE        # Energy
+  - XLI        # Industrials
+  - XLB        # Materials
+  - XLRE       # Real estate
+  - XLU        # Utilities
+  - XLC        # Communication

@@ -1,0 +1,13 @@
+# Hugging Face dataset repo config.
+# Set `private: false` only after confirming redistribution rights.
+
+repo_id: twelvedata/financial-world-model
+private: true
+configs:
+  - name: bars
+    description: "OHLCV + causal indicators + macro context. Parquet."
+  - name: text
+    description: "Textified rows with explicit prompt/label separation. JSONL."
+  - name: trajectories
+    description: "Rolling windows with states + next_states for world-model training."
+splits: [train, val, test]
