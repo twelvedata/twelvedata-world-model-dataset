@@ -2,7 +2,7 @@
 # Set `private: false` only after confirming redistribution rights.
 
 repo_id: twelvedata/financial-world-model
-private: true
+private: false
 configs:
   - name: bars
     description: "OHLCV + causal indicators + macro context. Parquet."
