@@ -81,8 +81,9 @@ def fetch_symbol_history(
     if start is None or end is None:
         start, end = backfill_window(tf)
 
-    start_dt = pd.Timestamp(start)
-    end_dt = pd.Timestamp(end)
+    tz = "America/New_York"
+    start_dt = pd.Timestamp(start, tz=tz)
+    end_dt = pd.Timestamp(end, tz=tz)
     interval_delta = timedelta(minutes=_INTERVAL_MINUTES.get(tf.interval, 1440))
 
     chunks: list[pd.DataFrame] = []
@@ -100,7 +101,7 @@ def fetch_symbol_history(
         if chunk.empty:
             break
         chunks.append(chunk)
-        earliest = pd.Timestamp(chunk["datetime"].iloc[0]).tz_localize(None)
+        earliest = pd.Timestamp(chunk["datetime"].iloc[0]).tz_convert(tz)
         if earliest <= start_dt:
             break
         # Step back one interval before the earliest bar we got.
@@ -113,7 +114,7 @@ def fetch_symbol_history(
     df = pd.concat(chunks, ignore_index=True)
     df = df.drop_duplicates(subset=["datetime"]).sort_values("datetime").reset_index(drop=True)
     # Trim to the requested window.
-    df = df.loc[pd.to_datetime(df["datetime"]) >= start_dt].reset_index(drop=True)
+    df = df.loc[pd.to_datetime(df["datetime"]).dt.tz_convert(tz) >= start_dt].reset_index(drop=True)
     return df
 
 
