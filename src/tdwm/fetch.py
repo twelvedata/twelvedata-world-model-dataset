@@ -97,7 +97,12 @@ def fetch_symbol_history(
             end=chunk_end.date().isoformat(),
             outputsize=5000,
         )
-        chunk = client.fetch_bars(req)
+        try:
+            chunk = client.fetch_bars(req)
+        except RuntimeError as e:
+            if "No data is available" in str(e):
+                break  # hit the API's history limit
+            raise
         if chunk.empty:
             break
         chunks.append(chunk)
