@@ -67,7 +67,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: Commit & push state (for inspection)
+      - name: Commit & push state
         if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && success() }}
         run: |
           git config user.name "twelvedata-bot"

@@ -73,10 +73,13 @@ def attach_macro(
 ) -> pd.DataFrame:
     """Left-join macro context onto `bars` by datetime (nearest past)."""
     out = bars.sort_values("datetime").copy()
+    # Normalize datetime precision to microseconds so merge_asof keys match.
+    out["datetime"] = pd.to_datetime(out["datetime"]).dt.as_unit("us")
     if not macro_frame.empty:
         # merge_asof: for each bar row take the most recent macro row
         # with datetime <= bar datetime (never future).
-        mf = macro_frame.sort_values("datetime")
+        mf = macro_frame.sort_values("datetime").copy()
+        mf["datetime"] = pd.to_datetime(mf["datetime"]).dt.as_unit("us")
         out = pd.merge_asof(
             out,
             mf,
@@ -96,7 +99,7 @@ def attach_macro(
         if sec_dt.dt.tz is None:
             sec_dt = sec_dt.dt.tz_localize("America/New_York")
         sec_df = pd.DataFrame(
-            {"datetime": sec_dt, "sector_logret_1": sec_ret.values}
+            {"datetime": sec_dt.dt.as_unit("us"), "sector_logret_1": sec_ret.values}
         ).sort_values("datetime")
         out = pd.merge_asof(out, sec_df, on="datetime", direction="backward")
     else:
