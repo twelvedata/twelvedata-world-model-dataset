@@ -47,7 +47,7 @@ class TDClient:
         api_key: str | None = None,
         sdk: Any = None,
         *,
-        max_retries: int = 4,
+        max_retries: int = 8,
         retry_base_sleep: float = 1.0,
     ):
         self.api_key = api_key or os.environ.get("TWELVE_DATA_API_KEY")
@@ -83,8 +83,11 @@ class TDClient:
                 return self._normalize(df, req)
             except Exception as exc:  # noqa: BLE001
                 last_err = exc
-                sleep_s = self.retry_base_sleep * (2**attempt)
-                time.sleep(sleep_s)
+                if "run out of API credits" in str(exc):
+                    print(f"  [rate-limit] sleeping 60s before retry (attempt {attempt + 1})")
+                    time.sleep(60)
+                else:
+                    time.sleep(self.retry_base_sleep * (2**attempt))
         raise RuntimeError(
             f"fetch_bars failed after {self.max_retries} retries for "
             f"{req.symbol} {req.interval}: {last_err}"
