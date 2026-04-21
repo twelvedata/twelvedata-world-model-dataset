@@ -100,7 +100,7 @@ def fetch_symbol_history(
         if chunk.empty:
             break
         chunks.append(chunk)
-        earliest = pd.Timestamp(chunk["datetime"].iloc[0])
+        earliest = pd.Timestamp(chunk["datetime"].iloc[0]).tz_localize(None)
         if earliest <= start_dt:
             break
         # Step back one interval before the earliest bar we got.
