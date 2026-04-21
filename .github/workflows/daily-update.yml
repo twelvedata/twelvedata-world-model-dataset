@@ -51,7 +51,7 @@ jobs:
           python scripts/update_daily.py $EXTRA
 
       - name: Build and push release
-        if: ${{ github.event_name == 'schedule' }}
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: python scripts/build_release.py
@@ -68,7 +68,7 @@ jobs:
           retention-days: 14
 
       - name: Commit & push state (for inspection)
-        if: ${{ github.event_name == 'schedule' && success() }}
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && success() }}
         run: |
           git config user.name "twelvedata-bot"
           git config user.email "bot@twelvedata.com"
