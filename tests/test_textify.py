@@ -73,5 +73,5 @@ def test_prompt_does_not_use_forbidden_words() -> None:
     rows = textify_frame(compute_all(df))
     for r in rows:
         assert not re.search(r"\bNext\b", r.prompt), (
-            f"Prompt contained the word 'Next' — look-ahead leakage risk"
+            "Prompt contained the word 'Next' — look-ahead leakage risk"
         )

@@ -9,13 +9,10 @@ from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
-import yaml
 
-from . import fetch as fetch_cfg
-from .schema import Trajectory, TextRow
 from .splits import SplitConfig
 from .storage import read_bars
-from .textify import textify_frame, textrows_to_records
+from .textify import textify_frame
 from .trajectories import build_trajectories, trajectories_to_records
 
 

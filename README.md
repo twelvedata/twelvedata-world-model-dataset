@@ -85,16 +85,35 @@ twelvedata-world-model-dataset/
 ## Quick start
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-export TWELVE_DATA_API_KEY=...
-python scripts/backfill.py --config config/timeframes.yaml --years 10
-python -m pytest -q
-python scripts/build_release.py --dry-run
+make install                             # creates .venv and installs deps
+cp .env.example .env                     # then fill in TWELVE_DATA_API_KEY
+                                         # get a free key at https://twelvedata.com/account/api-keys
+make backfill ARGS="--timeframes 1day --limit-symbols 5"  # smoke test: 5 symbols
+make test
+make release ARGS="--dry-run"            # writes parquet to data/release/, skips HF upload
 ```
 
-The `--dry-run` flag skips the HF push and just writes parquet splits to
-`data/release/`.
+The `--dry-run` flag skips the Hugging Face push and just writes parquet splits to
+`data/release/`. The published dataset lives at
+[huggingface.co/datasets/twelvedata/financial-world-model](https://huggingface.co/datasets/twelvedata/financial-world-model).
+
+## Troubleshooting
+
+**`ModuleNotFoundError: No module named 'yaml'` (or any other module)**
+You're running system Python instead of the project venv. Activate it first:
+```bash
+source .venv/bin/activate
+```
+Or prefix every command with `.venv/bin/python`.
+
+**`RuntimeError: No API key and no injected SDK`**
+Set your API key: `export TWELVE_DATA_API_KEY=<your_key>`. Get a free key at
+https://twelvedata.com/account/api-keys. You can also put it in a `.env` file at the repo root
+(see `.env.example`).
+
+**`python scripts/backfill.py` is slow on first run**
+That's expected — it fetches years of history for ~50 symbols. Use
+`--limit-symbols 5` for a smoke test, or `--timeframes 1day` to skip intraday.
 
 ## Design choices (and why)
 

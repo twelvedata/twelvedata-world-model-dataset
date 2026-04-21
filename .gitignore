@@ -26,6 +26,9 @@ Thumbs.db
 .idea/
 .vscode/
 
+# gstack local artifacts (security reports, learnings, analytics)
+.gstack/
+
 # Keep example outputs in examples/
 !examples/*.jsonl
 !examples/*.png

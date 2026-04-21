@@ -44,9 +44,12 @@ def _parse_csv(x: str | None) -> list[str] | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--symbols", type=str, default=None)
-    parser.add_argument("--timeframes", type=str, default=None)
-    parser.add_argument("--limit-symbols", type=int, default=None)
+    parser.add_argument("--symbols", type=str, default=None,
+                        help="CSV override for equity symbols.")
+    parser.add_argument("--timeframes", type=str, default=None,
+                        help="CSV override for timeframes (e.g. 1day,1h).")
+    parser.add_argument("--limit-symbols", type=int, default=None,
+                        help="For smoke tests: only fetch first N symbols.")
     args = parser.parse_args()
 
     syms_cfg = tdfetch.load_symbols()

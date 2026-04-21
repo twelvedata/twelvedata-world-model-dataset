@@ -64,7 +64,9 @@ class TDClient:
     def fetch_bars(self, req: FetchRequest) -> pd.DataFrame:
         if self._sdk is None:
             raise RuntimeError(
-                "No API key and no injected SDK — cannot fetch live data."
+                "No API key and no injected SDK — cannot fetch live data.\n"
+                "Set TWELVE_DATA_API_KEY env var or pass api_key= to TDClient.\n"
+                "Get a free key at https://twelvedata.com/account/api-keys"
             )
         last_err: Exception | None = None
         for attempt in range(self.max_retries):

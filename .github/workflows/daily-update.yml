@@ -42,14 +42,12 @@ jobs:
         env:
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          INPUT_SYMBOLS: ${{ github.event.inputs.symbols }}
+          INPUT_TIMEFRAMES: ${{ github.event.inputs.timeframes }}
         run: |
           EXTRA=""
-          if [ -n "${{ github.event.inputs.symbols }}" ]; then
-            EXTRA="$EXTRA --symbols ${{ github.event.inputs.symbols }}"
-          fi
-          if [ -n "${{ github.event.inputs.timeframes }}" ]; then
-            EXTRA="$EXTRA --timeframes ${{ github.event.inputs.timeframes }}"
-          fi
+          [ -n "$INPUT_SYMBOLS" ] && EXTRA="$EXTRA --symbols $INPUT_SYMBOLS"
+          [ -n "$INPUT_TIMEFRAMES" ] && EXTRA="$EXTRA --timeframes $INPUT_TIMEFRAMES"
           python scripts/update_daily.py $EXTRA
 
       - name: Build and push release
