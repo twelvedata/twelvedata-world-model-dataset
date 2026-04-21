@@ -59,10 +59,15 @@ def push_jsonl_config(
         raise RuntimeError("HF_TOKEN not set")
     from datasets import load_dataset  # noqa: WPS433
 
-    ds = load_dataset(
-        "json",
-        data_files={split: str(path) for split, path in split_files.items()},
-    )
+    nonempty = {
+        split: str(path)
+        for split, path in split_files.items()
+        if path.exists() and path.stat().st_size > 0
+    }
+    if not nonempty:
+        print(f"  [skip] {config_name}: all splits empty, nothing to push")
+        return
+    ds = load_dataset("json", data_files=nonempty)
     ds.push_to_hub(
         repo_id,
         config_name=config_name,
