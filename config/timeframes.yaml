@@ -12,7 +12,7 @@
 timeframes:
   - interval: 1day
     enabled: true
-    history_years: 20
+    history_years: 100
     session: regular
     trajectory_windows:
       - { size: 30, stride: 5 }
@@ -21,7 +21,7 @@ timeframes:
 
   - interval: 1h
     enabled: true
-    history_years: 5
+    history_years: 100
     session: regular
     trajectory_windows:
       - { size: 24, stride: 6 }     # ~3.5 trading days
