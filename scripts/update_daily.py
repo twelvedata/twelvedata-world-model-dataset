@@ -23,12 +23,12 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from tdwm import fetch as tdfetch                           # noqa: E402
-from tdwm.client import TDClient                            # noqa: E402
-from tdwm.enrich import attach_macro, build_macro_frame     # noqa: E402
-from tdwm.indicators import compute_all                     # noqa: E402
-from tdwm.state import State                                # noqa: E402
-from tdwm.storage import write_bars                         # noqa: E402
+from tdwm import fetch as tdfetch                                        # noqa: E402
+from tdwm.client import TDClient                                         # noqa: E402
+from tdwm.enrich import attach_macro, build_macro_frame                  # noqa: E402
+from tdwm.indicators import compute_all                                  # noqa: E402
+from tdwm.state import State                                             # noqa: E402
+from tdwm.storage import last_macro_datetime, read_macro, write_bars, write_macro  # noqa: E402
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -82,10 +82,30 @@ def main() -> int:
             # No state → fall back to full history.
             macro_start, _ = tdfetch.backfill_window(tf)
         macro_end = datetime.utcnow().date().isoformat()
-        print(f"[update] {tf.interval}: macro {macro_start}..{macro_end}")
-        macro_bars = tdfetch.fetch_macro(
-            client, macros, tf, start=macro_start, end=macro_end
-        )
+        print(f"[update] {tf.interval}: macro window {macro_start}..{macro_end}")
+        # Macro caching: only fetch tail that's missing, then persist.
+        macro_bars: dict[str, pd.DataFrame] = {}
+        for sym in macros:
+            cached = read_macro(DATA_ROOT, tf.interval, sym)
+            last_macro = last_macro_datetime(DATA_ROOT, tf.interval, sym)
+            if last_macro is not None:
+                sym_start = (last_macro - pd.Timedelta(days=2)).date().isoformat()
+            else:
+                sym_start = macro_start
+            fresh = tdfetch.fetch_macro(client, [sym], tf, start=sym_start, end=macro_end)
+            combined_macro = fresh.get(sym, pd.DataFrame())
+            if not cached.empty and not combined_macro.empty:
+                combined_macro = (
+                    pd.concat([cached, combined_macro], ignore_index=True)
+                    .drop_duplicates(subset=["datetime"], keep="last")
+                    .sort_values("datetime")
+                    .reset_index(drop=True)
+                )
+            elif not cached.empty:
+                combined_macro = cached
+            if not combined_macro.empty:
+                write_macro(combined_macro, DATA_ROOT, tf.interval, sym)
+                macro_bars[sym] = combined_macro
         macro_frame = build_macro_frame(macro_bars)
 
         for sym in equities:

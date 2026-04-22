@@ -94,3 +94,39 @@ def last_datetime(
     if df.empty:
         return None
     return pd.Timestamp(df["datetime"].iloc[-1])
+
+
+def _macro_path(root: Path, timeframe: str, symbol: str) -> Path:
+    safe_sym = symbol.replace("/", "_").replace(".", "_")
+    return root / "macro" / timeframe / f"{safe_sym}.parquet"
+
+
+def write_macro(df: pd.DataFrame, root: Path, timeframe: str, symbol: str) -> Path:
+    """Merge-write macro bars for one symbol/timeframe. Dedupes by datetime."""
+    dest = _macro_path(root, timeframe, symbol)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        existing = pd.read_parquet(dest)
+        df = (
+            pd.concat([existing, df], ignore_index=True)
+            .drop_duplicates(subset=["datetime"], keep="last")
+            .sort_values("datetime")
+            .reset_index(drop=True)
+        )
+    _atomic_write(df, dest)
+    return dest
+
+
+def read_macro(root: Path, timeframe: str, symbol: str) -> pd.DataFrame:
+    """Read cached macro bars for one symbol/timeframe. Returns empty DF if missing."""
+    p = _macro_path(root, timeframe, symbol)
+    if not p.exists():
+        return pd.DataFrame()
+    return pd.read_parquet(p)
+
+
+def last_macro_datetime(root: Path, timeframe: str, symbol: str) -> pd.Timestamp | None:
+    df = read_macro(root, timeframe, symbol)
+    if df.empty:
+        return None
+    return pd.Timestamp(df["datetime"].iloc[-1])
