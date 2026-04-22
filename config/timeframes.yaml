@@ -29,7 +29,7 @@ timeframes:
 
   - interval: 1min
     enabled: true
-    history_years: 1
+    history_years: 10
     session: regular
     trajectory_windows:
       - { size: 390, stride: 195 }  # one US session, half-session stride
