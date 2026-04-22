@@ -2,13 +2,14 @@
 data/
 !data/.gitkeep
 !data/_state.json
+!data/_corporate_actions.json
 *.parquet
 *.jsonl
 *.png
 *.jpg
 *.jpeg
 
-# Python
+# Pythonw
 __pycache__/
 *.py[cod]
 *.egg-info/

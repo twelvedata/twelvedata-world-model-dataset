@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tdwm import fetch as tdfetch                                        # noqa: E402
 from tdwm.client import TDClient                                         # noqa: E402
+from tdwm.corporate_actions import check_corporate_actions, clear_symbol_bars  # noqa: E402
 from tdwm.enrich import attach_macro, build_macro_frame                  # noqa: E402
 from tdwm.indicators import compute_all                                  # noqa: E402
 from tdwm.state import State                                             # noqa: E402
@@ -67,6 +68,18 @@ def main() -> int:
     client = TDClient()
     state = State.load(STATE_PATH)
     run_started = datetime.utcnow()
+
+    # Detect splits/dividends — re-backfill affected symbols from scratch.
+    print("[update] checking corporate actions …")
+    dirty = check_corporate_actions(client._sdk, equities, DATA_ROOT)
+    for sym in dirty:
+        print(f"[update] {sym}: clearing stored bars due to corporate action")
+        clear_symbol_bars(DATA_ROOT, sym)
+        # Clear state so the equity loop does a full re-backfill.
+        for tf in tfs:
+            state.entries.pop(State.key(tf.interval, sym), None)
+    if dirty:
+        state.save(STATE_PATH)
 
     for tf in tfs:
         # We need macro history going back to the earliest equity last_known
