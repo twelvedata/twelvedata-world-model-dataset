@@ -1,6 +1,7 @@
 # Data
 data/
 !data/.gitkeep
+!data/_state.json
 *.parquet
 *.jsonl
 *.png
