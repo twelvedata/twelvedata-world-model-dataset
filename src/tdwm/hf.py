@@ -34,10 +34,13 @@ def push_parquet_config(
 
     dd = DatasetDict()
     for split, path in split_files.items():
-        if not path.exists():
+        if not path.exists() or path.stat().st_size == 0:
             continue
         df = pd.read_parquet(path)
         dd[split] = Dataset.from_pandas(df, preserve_index=False)
+    if not dd:
+        print(f"  [skip] {config_name}: all splits empty, nothing to push")
+        return
     dd.push_to_hub(
         repo_id,
         config_name=config_name,
