@@ -80,14 +80,21 @@ def main() -> int:
         return 0
 
     # Real push.
+    import time as _time
     from tdwm.hf import load_hf_config, push_parquet_config, push_jsonl_config
     hf_cfg = load_hf_config(REPO_ROOT / "config" / "hf.yaml")
+    configs_total = len(tfs) * 3
+    configs_done = 0
+    t_start = _time.time()
+
     for tf in tfs:
         suffix = tf.interval
         bars_files = {
             s: RELEASE_ROOT / "bars" / suffix / f"{s}.parquet"
             for s in ("train", "val", "test")
         }
+        configs_done += 1
+        print(f"\n[push {configs_done}/{configs_total}] bars_{suffix}")
         push_parquet_config(
             hf_cfg["repo_id"], f"bars_{suffix}", bars_files,
             private=hf_cfg.get("private", True),
@@ -96,6 +103,8 @@ def main() -> int:
             s: RELEASE_ROOT / "text" / suffix / f"{s}.jsonl"
             for s in ("train", "val", "test")
         }
+        configs_done += 1
+        print(f"\n[push {configs_done}/{configs_total}] text_{suffix}")
         push_jsonl_config(
             hf_cfg["repo_id"], f"text_{suffix}", text_files,
             private=hf_cfg.get("private", True),
@@ -104,11 +113,14 @@ def main() -> int:
             s: RELEASE_ROOT / "trajectories" / suffix / f"{s}.jsonl"
             for s in ("train", "val", "test")
         }
+        configs_done += 1
+        print(f"\n[push {configs_done}/{configs_total}] trajectories_{suffix}")
         push_jsonl_config(
             hf_cfg["repo_id"], f"trajectories_{suffix}", traj_files,
             private=hf_cfg.get("private", True),
         )
-    print("[release] pushed to HF.")
+    elapsed = _time.time() - t_start
+    print(f"\n[release] all {configs_total} configs pushed to HF in {elapsed:.0f}s")
     return 0
 
 
