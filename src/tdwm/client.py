@@ -83,7 +83,12 @@ class TDClient:
                 return self._normalize(df, req)
             except Exception as exc:  # noqa: BLE001
                 last_err = exc
-                if "run out of API credits" in str(exc):
+                msg = str(exc)
+                if "No data is available" in msg:
+                    # Expected when requesting history past a symbol's
+                    # inception — not retryable.
+                    raise
+                if "run out of API credits" in msg:
                     print(f"  [rate-limit] sleeping 60s before retry (attempt {attempt + 1})")
                     time.sleep(60)
                 else:

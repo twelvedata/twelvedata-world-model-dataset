@@ -34,3 +34,4 @@ Thumbs.db
 # Keep example outputs in examples/
 !examples/*.jsonl
 !examples/*.png
+uv.lock

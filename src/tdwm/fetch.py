@@ -107,6 +107,11 @@ def fetch_symbol_history(
             break
         chunks.append(chunk)
         earliest = pd.Timestamp(chunk["datetime"].iloc[0]).tz_convert(tz)
+        # A short page means we've reached the symbol's inception — another
+        # request would just waste retries on "No data is available".
+        if len(chunk) < req.outputsize:
+            print(f"  [page] {symbol} {tf.interval}: got {len(chunk)} rows (inception reached)")
+            break
         if earliest <= start_dt:
             break
         # Step back one interval before the earliest bar we got.
