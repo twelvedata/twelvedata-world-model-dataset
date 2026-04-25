@@ -140,7 +140,15 @@ def textify_frame(
     dt_col = pd.to_datetime(df["datetime"])
     tz_aware = dt_col.dt.tz is not None
     if tz_aware:
-        when = dt_col.dt.strftime("%Y-%m-%d %H:%M %Z").tolist()
+        # `%Z` triggers a per-element timezone-name lookup inside
+        # `tslib._format_native_types` that is pathologically slow on
+        # us-precision tz-aware series (10+ minutes for ~13k rows on
+        # some symbols, depending on stored dtype quirks). The tz is
+        # the same for every row in a single tz-aware Series, so format
+        # without %Z and append the IANA name once.
+        tz_name = str(dt_col.dt.tz)
+        formatted = dt_col.dt.strftime("%Y-%m-%d %H:%M").tolist()
+        when = [f"{f} {tz_name}" for f in formatted]
     else:
         when = dt_col.dt.strftime("%Y-%m-%d").tolist()
     # `.isoformat()` matches the legacy "+HH:MM" offset style that
