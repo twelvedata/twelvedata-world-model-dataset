@@ -28,6 +28,7 @@ from tdwm.client import TDClient                                         # noqa:
 from tdwm.corporate_actions import check_corporate_actions, clear_symbol_bars  # noqa: E402
 from tdwm.enrich import attach_macro, build_macro_frame                  # noqa: E402
 from tdwm.indicators import compute_all                                  # noqa: E402
+from tdwm.schema import MACRO_COLUMNS                                    # noqa: E402
 from tdwm.state import State                                             # noqa: E402
 from tdwm.storage import last_macro_datetime, read_macro, write_bars, write_macro  # noqa: E402
 
@@ -158,6 +159,15 @@ def main() -> int:
                 # Drop rows we're about to replace (last 3 days of existing)
                 cutoff = pd.Timestamp(raw["datetime"].iloc[0])
                 existing = existing.loc[pd.to_datetime(existing["datetime"]) < cutoff]
+                # Stored rows already carry macro columns from their
+                # original write; strip them so attach_macro can re-apply
+                # without merge_asof suffix collisions on the combined
+                # frame. Indicator columns are also recomputed below, so
+                # drop those too to avoid the same kind of collision if
+                # we ever re-enrich indicators via merge.
+                drop_cols = [c for c in MACRO_COLUMNS if c in existing.columns]
+                if drop_cols:
+                    existing = existing.drop(columns=drop_cols)
                 combined = pd.concat([existing, raw], ignore_index=True)
             else:
                 combined = raw
