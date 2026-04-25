@@ -1,9 +1,12 @@
 """Assemble a release from the partitioned parquet store.
 
 For each timeframe:
-- bars:        write_splits_parquet  → data/release/bars/{tf}/{split}.parquet
-- text:        write_splits_jsonl    → data/release/text/{tf}/{split}.jsonl
-- trajectories: write_splits_jsonl    → data/release/trajectories/{tf}/{split}.jsonl
+- bars:         data/release/bars/{tf}/{split}.parquet
+- text:         data/release/text/{tf}/{split}.jsonl
+- trajectories: data/release/trajectories/{tf}/{split}.jsonl
+
+All three sinks stream per symbol so peak memory stays bounded. Progress
+is logged per symbol with counts and per-stage timings.
 
 --dry-run skips the Hugging Face upload.
 """
@@ -11,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import yaml
@@ -18,13 +22,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tdwm import fetch as tdfetch                          # noqa: E402
-from tdwm.release import (                                 # noqa: E402
-    build_bars_splits,
-    build_text_splits,
-    build_trajectory_splits,
-    write_splits_jsonl,
-    write_splits_parquet,
-)
+from tdwm.release import stream_release_for_timeframe      # noqa: E402
 from tdwm.splits import SplitConfig                        # noqa: E402
 
 
@@ -43,8 +41,31 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true",
                         help="Skip Hugging Face upload.")
+    parser.add_argument("--push-only", action="store_true",
+                        help="Skip the build phase; push existing files in "
+                             "data/release/ straight to HF.")
+    parser.add_argument("--card-only", action="store_true",
+                        help="Skip build and config uploads; only push "
+                             "config/dataset_card.md as README.md.")
+    parser.add_argument("--clean", action="store_true",
+                        help="Delete every file in the HF dataset repo "
+                             "before uploading. Requires confirmation.")
+    parser.add_argument("--yes", action="store_true",
+                        help="Skip the --clean confirmation prompt.")
     parser.add_argument("--timeframes", type=str, default=None)
     args = parser.parse_args()
+
+    if args.dry_run and args.push_only:
+        parser.error("--dry-run and --push-only are mutually exclusive.")
+    if args.dry_run and args.card_only:
+        parser.error("--dry-run and --card-only are mutually exclusive.")
+    if args.push_only and args.card_only:
+        parser.error("--push-only and --card-only are mutually exclusive.")
+    if args.clean and args.card_only:
+        parser.error("--clean would wipe data files; not allowed with "
+                     "--card-only.")
+    if args.clean and args.dry_run:
+        parser.error("--clean has no effect with --dry-run.")
 
     tfs = tdfetch.load_timeframes()
     if args.timeframes:
@@ -55,37 +76,66 @@ def main() -> int:
     split_cfg = SplitConfig.load()
     features = _load_features()
 
-    for tf in tfs:
-        print(f"[release] {tf.interval}")
-
-        bars = build_bars_splits(DATA_ROOT, equities, tf.interval, split_cfg)
-        p = write_splits_parquet(bars, RELEASE_ROOT / "bars" / tf.interval)
-        print(f"  bars: {p}")
-
-        text = build_text_splits(DATA_ROOT, equities, tf.interval, split_cfg)
-        p = write_splits_jsonl(text, RELEASE_ROOT / "text" / tf.interval)
-        print(f"  text: {p}")
-
-        trajs = build_trajectory_splits(
-            DATA_ROOT, equities, tf.interval,
-            feature_names=features,
-            windows=tf.trajectory_windows,
-            split_cfg=split_cfg,
+    if args.card_only:
+        from tdwm.hf import load_hf_config, push_dataset_card  # noqa: WPS433
+        hf_cfg = load_hf_config(REPO_ROOT / "config" / "hf.yaml")
+        card_path = REPO_ROOT / "config" / "dataset_card.md"
+        if not card_path.exists():
+            print(f"[error] no dataset card at {card_path}")
+            return 1
+        print("[push] dataset card (README.md)")
+        push_dataset_card(
+            hf_cfg["repo_id"], card_path,
+            private=hf_cfg.get("private", True),
         )
-        p = write_splits_jsonl(trajs, RELEASE_ROOT / "trajectories" / tf.interval)
-        print(f"  trajectories: {p}")
+        return 0
+
+    if args.push_only:
+        print("[release] push-only: skipping build, using existing "
+              f"files in {RELEASE_ROOT}")
+    else:
+        release_started = time.perf_counter()
+        for tf in tfs:
+            print(f"[release] {tf.interval}  ({len(equities)} equities)")
+            stream_release_for_timeframe(
+                DATA_ROOT,
+                equities,
+                tf.interval,
+                feature_names=features,
+                windows=tf.trajectory_windows,
+                split_cfg=split_cfg,
+                out_root=RELEASE_ROOT,
+            )
+        elapsed = time.perf_counter() - release_started
+        print(f"\n[release] all timeframes built in {elapsed:.0f}s")
 
     if args.dry_run:
         print("[release] dry-run: skipping Hugging Face upload.")
         return 0
 
     # Real push.
-    import time as _time
-    from tdwm.hf import load_hf_config, push_parquet_config, push_jsonl_config
+    from tdwm.hf import (
+        clear_repo_contents,
+        load_hf_config,
+        push_dataset_card,
+        push_jsonl_config,
+        push_parquet_config,
+    )
     hf_cfg = load_hf_config(REPO_ROOT / "config" / "hf.yaml")
+
+    if args.clean:
+        print(f"[clean] about to delete ALL files in {hf_cfg['repo_id']}")
+        if not args.yes:
+            resp = input("  type 'yes' to continue: ").strip().lower()
+            if resp != "yes":
+                print("[clean] aborted.")
+                return 1
+        removed = clear_repo_contents(hf_cfg["repo_id"])
+        print(f"[clean] removed {removed} files from {hf_cfg['repo_id']}")
+
     configs_total = len(tfs) * 3
     configs_done = 0
-    t_start = _time.time()
+    t_push = time.perf_counter()
 
     for tf in tfs:
         suffix = tf.interval
@@ -110,17 +160,27 @@ def main() -> int:
             private=hf_cfg.get("private", True),
         )
         traj_files = {
-            s: RELEASE_ROOT / "trajectories" / suffix / f"{s}.jsonl"
+            s: RELEASE_ROOT / "trajectories" / suffix / f"{s}.parquet"
             for s in ("train", "val", "test")
         }
         configs_done += 1
         print(f"\n[push {configs_done}/{configs_total}] trajectories_{suffix}")
-        push_jsonl_config(
+        push_parquet_config(
             hf_cfg["repo_id"], f"trajectories_{suffix}", traj_files,
             private=hf_cfg.get("private", True),
         )
-    elapsed = _time.time() - t_start
-    print(f"\n[release] all {configs_total} configs pushed to HF in {elapsed:.0f}s")
+    push_elapsed = time.perf_counter() - t_push
+    print(f"\n[release] all {configs_total} configs pushed to HF in {push_elapsed:.0f}s")
+
+    card_path = REPO_ROOT / "config" / "dataset_card.md"
+    if card_path.exists():
+        print("\n[push] dataset card (README.md)")
+        push_dataset_card(
+            hf_cfg["repo_id"], card_path,
+            private=hf_cfg.get("private", True),
+        )
+    else:
+        print(f"[warn] no dataset card at {card_path}; skipping README upload")
     return 0
 
 
