@@ -156,11 +156,19 @@ class SplitParquetSink:
         self.paths: dict[str, Path] = {}
         self.counts: dict[str, int] = {s: 0 for s in SPLITS}
 
-    def add(self, df: pd.DataFrame, split_cfg: SplitConfig) -> None:
+    def add(
+        self,
+        df: pd.DataFrame,
+        split_cfg: SplitConfig,
+        *,
+        allowed_splits: set[str] | None = None,
+    ) -> None:
         if df.empty:
             return
         splits = df["datetime"].map(lambda ts: split_cfg.assign(pd.Timestamp(ts)))
         for name in SPLITS:
+            if allowed_splits is not None and name not in allowed_splits:
+                continue
             mask = (splits == name).values
             if not mask.any():
                 continue
@@ -208,14 +216,25 @@ def stream_release_for_timeframe(
     out_root: Path,
     *,
     log: Callable[[str], None] = print,
+    only_splits: Iterable[str] | None = None,
 ) -> dict[str, dict[str, Path]]:
     """Stream bars, text, and trajectories to disk one symbol at a time.
 
     Returns `{"bars": {split: path}, "text": {...}, "trajectories": {...}}`.
+
+    `only_splits` restricts emitted splits (e.g. `{"test"}` for a daily
+    rebuild that only changes the test partition). Other splits are
+    skipped end-to-end — not just on write — so existing files for them
+    remain untouched on disk.
     """
     bars_dir = out_root / "bars" / timeframe
     text_dir = out_root / "text" / timeframe
     traj_dir = out_root / "trajectories" / timeframe
+
+    allowed = set(only_splits) if only_splits is not None else set(SPLITS)
+    bad = allowed - set(SPLITS)
+    if bad:
+        raise ValueError(f"unknown split(s): {sorted(bad)}")
 
     n_sym = len(symbols)
     tf_started = time.perf_counter()
@@ -233,7 +252,7 @@ def stream_release_for_timeframe(
 
             # --- bars
             t_bars = time.perf_counter()
-            bars_sink.add(df, split_cfg)
+            bars_sink.add(df, split_cfg, allowed_splits=allowed)
             dt_bars = time.perf_counter() - t_bars
 
             # --- text
@@ -241,6 +260,8 @@ def stream_release_for_timeframe(
             text_added = 0
             for row in textify_frame(df, verbose=True):
                 split = split_cfg.assign(pd.Timestamp(row.as_of))
+                if split not in allowed:
+                    continue
                 text_sink.add(split, asdict(row))
                 text_added += 1
             dt_text = time.perf_counter() - t_text
@@ -258,7 +279,7 @@ def stream_release_for_timeframe(
                     first_ts = pd.Timestamp(t.timestamps[0])
                     last_ts = pd.Timestamp(t.timestamps[-1])
                     split = split_cfg.split_of_trajectory(first_ts, last_ts)
-                    if split is None:
+                    if split is None or split not in allowed:
                         continue
                     t.split = split
                     traj_sink.add(split, trajectory_to_record(t))

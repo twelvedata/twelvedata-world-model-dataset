@@ -29,6 +29,10 @@ from tdwm.splits import SplitConfig                        # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_ROOT = REPO_ROOT / "data"
 RELEASE_ROOT = DATA_ROOT / "release"
+# update_daily.py writes this when corporate actions restate historical
+# close_adj — see scripts/update_daily.py. Its presence forces a full
+# rebuild even if --splits requested a subset.
+FULL_REBUILD_MARKER = DATA_ROOT / "_full_rebuild_required"
 
 
 def _load_features() -> list[str]:
@@ -53,6 +57,12 @@ def main() -> int:
     parser.add_argument("--yes", action="store_true",
                         help="Skip the --clean confirmation prompt.")
     parser.add_argument("--timeframes", type=str, default=None)
+    parser.add_argument(
+        "--splits", type=str, default=None,
+        help="Comma-separated subset of train,val,test. When set, only "
+             "those splits are rebuilt and pushed; other splits in the HF "
+             "repo are left untouched. Defaults to all three.",
+    )
     args = parser.parse_args()
 
     if args.dry_run and args.push_only:
@@ -76,6 +86,34 @@ def main() -> int:
     split_cfg = SplitConfig.load()
     features = _load_features()
 
+    all_splits = ("train", "val", "test")
+    if args.splits:
+        only_splits = tuple(s.strip() for s in args.splits.split(","))
+        bad = [s for s in only_splits if s not in all_splits]
+        if bad:
+            parser.error(
+                f"--splits got unknown value(s) {bad}; allowed: {all_splits}"
+            )
+    else:
+        only_splits = all_splits
+
+    # Corporate-action override: build_release won't honor a partial
+    # rebuild while historical close_adj is dirty. Skip the override for
+    # push-only / card-only since those don't touch the build at all.
+    if (
+        FULL_REBUILD_MARKER.exists()
+        and not args.push_only
+        and not args.card_only
+        and only_splits != all_splits
+    ):
+        symbols_dirty = FULL_REBUILD_MARKER.read_text().strip()
+        print(
+            f"[release] {FULL_REBUILD_MARKER.name} present "
+            f"(dirty: {symbols_dirty or 'unknown'}) → "
+            f"overriding --splits to full rebuild"
+        )
+        only_splits = all_splits
+
     if args.card_only:
         from tdwm.hf import load_hf_config, push_dataset_card  # noqa: WPS433
         hf_cfg = load_hf_config(REPO_ROOT / "config" / "hf.yaml")
@@ -95,6 +133,8 @@ def main() -> int:
               f"files in {RELEASE_ROOT}")
     else:
         release_started = time.perf_counter()
+        if only_splits != all_splits:
+            print(f"[release] splits filter: {','.join(only_splits)}")
         for tf in tfs:
             print(f"[release] {tf.interval}  ({len(equities)} equities)")
             stream_release_for_timeframe(
@@ -105,6 +145,7 @@ def main() -> int:
                 windows=tf.trajectory_windows,
                 split_cfg=split_cfg,
                 out_root=RELEASE_ROOT,
+                only_splits=only_splits,
             )
         elapsed = time.perf_counter() - release_started
         print(f"\n[release] all timeframes built in {elapsed:.0f}s")
@@ -141,7 +182,7 @@ def main() -> int:
         suffix = tf.interval
         bars_files = {
             s: RELEASE_ROOT / "bars" / suffix / f"{s}.parquet"
-            for s in ("train", "val", "test")
+            for s in only_splits
         }
         configs_done += 1
         print(f"\n[push {configs_done}/{configs_total}] bars_{suffix}")
@@ -151,7 +192,7 @@ def main() -> int:
         )
         text_files = {
             s: RELEASE_ROOT / "text" / suffix / f"{s}.jsonl"
-            for s in ("train", "val", "test")
+            for s in only_splits
         }
         configs_done += 1
         print(f"\n[push {configs_done}/{configs_total}] text_{suffix}")
@@ -161,7 +202,7 @@ def main() -> int:
         )
         traj_files = {
             s: RELEASE_ROOT / "trajectories" / suffix / f"{s}.parquet"
-            for s in ("train", "val", "test")
+            for s in only_splits
         }
         configs_done += 1
         print(f"\n[push {configs_done}/{configs_total}] trajectories_{suffix}")
@@ -181,6 +222,16 @@ def main() -> int:
         )
     else:
         print(f"[warn] no dataset card at {card_path}; skipping README upload")
+
+    # Marker is cleared whenever a run pushes all three splits — works
+    # equally for the forced-override path and a manual full rebuild.
+    if (
+        FULL_REBUILD_MARKER.exists()
+        and set(only_splits) == set(all_splits)
+        and not args.card_only
+    ):
+        FULL_REBUILD_MARKER.unlink()
+        print(f"[release] cleared {FULL_REBUILD_MARKER.name}")
     return 0
 
 

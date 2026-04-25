@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -35,6 +35,11 @@ from tdwm.storage import last_macro_datetime, read_macro, write_bars, write_macr
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_ROOT = REPO_ROOT / "data"
 STATE_PATH = DATA_ROOT / "_state.json"
+# Marker that flags the next build_release.py run to rebuild ALL splits
+# instead of just `test`. Written when a corporate action restates
+# historical close_adj on any symbol; build_release.py removes it after
+# a successful full push.
+FULL_REBUILD_MARKER = DATA_ROOT / "_full_rebuild_required"
 
 
 def _parse_csv(x: str | None) -> list[str] | None:
@@ -67,7 +72,7 @@ def main() -> int:
 
     client = TDClient()
     state = State.load(STATE_PATH)
-    run_started = datetime.utcnow()
+    run_started = datetime.now(timezone.utc)
 
     # Detect splits/dividends — re-backfill affected symbols from scratch.
     print("[update] checking corporate actions …")
@@ -80,6 +85,10 @@ def main() -> int:
             state.entries.pop(State.key(tf.interval, sym), None)
     if dirty:
         state.save(STATE_PATH)
+        # Signal the release builder to rebuild ALL splits (train/val
+        # close_adj history just shifted under our feet).
+        FULL_REBUILD_MARKER.write_text(",".join(sorted(dirty)) + "\n")
+        print(f"[update] wrote {FULL_REBUILD_MARKER.name}: full rebuild scheduled")
 
     for tf in tfs:
         # We need macro history going back to the earliest equity last_known
@@ -94,7 +103,7 @@ def main() -> int:
         else:
             # No state → fall back to full history.
             macro_start, _ = tdfetch.backfill_window(tf)
-        macro_end = datetime.utcnow().date().isoformat()
+        macro_end = datetime.now(timezone.utc).date().isoformat()
         print(f"[update] {tf.interval}: macro window {macro_start}..{macro_end}")
         # Macro caching: only fetch tail that's missing, then persist.
         macro_bars: dict[str, pd.DataFrame] = {}

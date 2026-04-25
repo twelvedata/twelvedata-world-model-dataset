@@ -11,6 +11,9 @@ on:
       timeframes:
         description: "Comma-separated override (e.g. 1day,1h)"
         required: false
+      splits:
+        description: "Comma-separated splits to rebuild+push (default: test only on cron, all three on manual)"
+        required: false
 
 concurrency:
   group: daily-update
@@ -53,4 +56,26 @@ jobs:
         if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: .venv/bin/python scripts/build_release.py
+          INPUT_SPLITS: ${{ github.event.inputs.splits }}
+          EVENT_NAME: ${{ github.event_name }}
+          # Disable HF's in-memory accelerated uploaders. xet and
+          # hf_transfer buffer multi-GB chunks while hashing, which OOM-
+          # kills (exit 137) the runner on the 6+ GB trajectories/1min
+          # parquet. Plain multipart streams bytes off disk at ~constant
+          # RAM. Trade: slightly slower upload, but actually finishes.
+          HF_HUB_DISABLE_XET: "1"
+          HF_HUB_ENABLE_HF_TRANSFER: "0"
+        run: |
+          # Cron runs only rebuild + push the `test` split (train ≤ 2023
+          # and val = 2024 are immutable barring a corporate-action
+          # restatement, which triggers a full per-symbol re-backfill in
+          # update_daily.py). Manual dispatch with no override does a
+          # full rebuild; pass `splits=test` for the cheap path.
+          if [ -n "$INPUT_SPLITS" ]; then
+            SPLITS_FLAG="--splits $INPUT_SPLITS"
+          elif [ "$EVENT_NAME" = "schedule" ]; then
+            SPLITS_FLAG="--splits test"
+          else
+            SPLITS_FLAG=""
+          fi
+          .venv/bin/python scripts/build_release.py $SPLITS_FLAG

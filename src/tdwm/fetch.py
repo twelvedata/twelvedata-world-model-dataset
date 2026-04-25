@@ -110,11 +110,20 @@ def fetch_symbol_history(
         # Reached the requested start — normal termination.
         if earliest <= start_dt:
             break
-        # A short page means the symbol's own inception is more recent
-        # than start_dt. Stop here so we don't waste retries on the next
-        # request that would just return "No data is available".
+        # A short page means the next request would return no rows, so
+        # stop. Two reasons we end up here, and they look different in
+        # logs: a deep backfill that hit the symbol's actual inception
+        # (earliest >> start_dt with a full window's worth of unfilled
+        # range), vs. an incremental run where the requested window was
+        # just smaller than one page.
         if len(chunk) < req.outputsize:
-            print(f"  [page] {symbol} {tf.interval}: got {len(chunk)} rows (inception reached)")
+            unfilled = (earliest - start_dt) - interval_delta * len(chunk)
+            page_span = interval_delta * req.outputsize
+            if unfilled > page_span:
+                reason = "inception reached"
+            else:
+                reason = "window complete"
+            print(f"  [page] {symbol} {tf.interval}: got {len(chunk)} rows ({reason})")
             break
         # Step back one interval before the earliest bar we got.
         chunk_end = earliest - interval_delta

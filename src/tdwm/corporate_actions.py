@@ -38,18 +38,39 @@ def _save_seen(data_root: Path, record: dict[str, Any]) -> None:
     tmp.replace(p)
 
 
+# NOTE: twelvedata SDK 1.3.0's `.as_pandas()` on splits/dividends raises
+# `'list' object has no attribute 'items'` because the endpoint returns
+# `{"meta": {...}, "splits": [...]}` and the SDK's pandas adapter doesn't
+# unwrap the list. `.as_json()` returns the raw payload — we pull dates
+# out of that directly.
+
+def _extract_dates(payload: Any, list_key: str, date_keys: tuple[str, ...]) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    items = payload.get(list_key)
+    if not isinstance(items, list):
+        return []
+    out: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        for k in date_keys:
+            v = item.get(k)
+            if v:
+                out.append(str(v))
+                break
+    return out
+
+
 def _fetch_splits(sdk: Any, symbol: str, start_date: str, end_date: str) -> list[str]:
     """Return list of split dates for symbol in [start_date, end_date]."""
     try:
-        df = sdk.get_splits(
+        payload = sdk.get_splits(
             symbol=symbol,
             start_date=start_date,
             end_date=end_date,
-        ).as_pandas()
-        if df is None or df.empty:
-            return []
-        date_col = "date" if "date" in df.columns else df.columns[0]
-        return list(df[date_col].astype(str))
+        ).as_json()
+        return _extract_dates(payload, "splits", ("date",))
     except Exception as exc:  # noqa: BLE001
         print(f"  [warn] splits fetch failed for {symbol}: {exc}")
         return []
@@ -58,17 +79,12 @@ def _fetch_splits(sdk: Any, symbol: str, start_date: str, end_date: str) -> list
 def _fetch_dividends(sdk: Any, symbol: str, start_date: str, end_date: str) -> list[str]:
     """Return list of ex-dividend dates for symbol in [start_date, end_date]."""
     try:
-        df = sdk.get_dividends(
+        payload = sdk.get_dividends(
             symbol=symbol,
             start_date=start_date,
             end_date=end_date,
-        ).as_pandas()
-        if df is None or df.empty:
-            return []
-        date_col = "ex_date" if "ex_date" in df.columns else (
-            "date" if "date" in df.columns else df.columns[0]
-        )
-        return list(df[date_col].astype(str))
+        ).as_json()
+        return _extract_dates(payload, "dividends", ("ex_date", "date"))
     except Exception as exc:  # noqa: BLE001
         print(f"  [warn] dividends fetch failed for {symbol}: {exc}")
         return []

@@ -19,19 +19,23 @@ from tdwm.corporate_actions import (
 # ---------------------------------------------------------------------------
 
 def _make_sdk(splits: dict[str, list[str]], dividends: dict[str, list[str]]) -> MagicMock:
-    """Return a fake SDK whose get_splits / get_dividends return canned data."""
+    """Return a fake SDK whose get_splits / get_dividends return canned data.
+
+    Mirrors the real twelvedata SDK's `.as_json()` shape:
+        {"meta": {...}, "splits"|"dividends": [{"date"|"ex_date": ...}, ...]}
+    """
     sdk = MagicMock()
 
     def _splits_builder(symbol, **_):
-        rows = [{"date": d} for d in splits.get(symbol, [])]
+        items = [{"date": d} for d in splits.get(symbol, [])]
         builder = MagicMock()
-        builder.as_pandas.return_value = pd.DataFrame(rows) if rows else pd.DataFrame()
+        builder.as_json.return_value = {"meta": {"symbol": symbol}, "splits": items}
         return builder
 
     def _dividends_builder(symbol, **_):
-        rows = [{"ex_date": d} for d in dividends.get(symbol, [])]
+        items = [{"ex_date": d} for d in dividends.get(symbol, [])]
         builder = MagicMock()
-        builder.as_pandas.return_value = pd.DataFrame(rows) if rows else pd.DataFrame()
+        builder.as_json.return_value = {"meta": {"symbol": symbol}, "dividends": items}
         return builder
 
     sdk.get_splits.side_effect = _splits_builder
