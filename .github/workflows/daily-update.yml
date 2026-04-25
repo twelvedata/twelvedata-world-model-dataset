@@ -18,24 +18,24 @@ concurrency:
 
 jobs:
   update:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: false
+          clean: false   # preserve .venv across runs
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Mount persistent data dir + setup venv
+        run: |
+          rm -rf data
+          ln -s /mnt/HC_Volume_105514388 data
+          [ -d .venv ] || python3 -m venv .venv
+          .venv/bin/pip install -q -r requirements.txt
+          .venv/bin/pip install -q -e .
 
       - name: Run leakage validator (fast)
-        run: python scripts/validate_no_leakage.py
+        run: .venv/bin/python scripts/validate_no_leakage.py
 
       - name: Daily update
         env:
@@ -47,24 +47,13 @@ jobs:
           EXTRA=""
           [ -n "$INPUT_SYMBOLS" ] && EXTRA="$EXTRA --symbols $INPUT_SYMBOLS"
           [ -n "$INPUT_TIMEFRAMES" ] && EXTRA="$EXTRA --timeframes $INPUT_TIMEFRAMES"
-          python scripts/update_daily.py $EXTRA
+          .venv/bin/python scripts/update_daily.py $EXTRA
 
       - name: Build and push release
         if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: python scripts/build_release.py
-
-      - name: Upload parquet artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: data-state
-          path: |
-            data/_state.json
-            data/release/**
-          if-no-files-found: ignore
-          retention-days: 14
+        run: .venv/bin/python scripts/build_release.py
 
       - name: Commit & push state
         if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && success() }}
