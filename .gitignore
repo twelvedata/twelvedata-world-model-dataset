@@ -1,8 +1,6 @@
-# Data
+# Data — fully gitignored. State lives on the runner's persistent volume.
 data/
 !data/.gitkeep
-!data/_state.json
-!data/_corporate_actions.json
 *.parquet
 *.jsonl
 *.png

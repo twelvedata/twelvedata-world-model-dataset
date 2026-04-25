@@ -54,14 +54,3 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: .venv/bin/python scripts/build_release.py
-
-      - name: Commit & push state
-        if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && success() }}
-        run: |
-          git config user.name "twelvedata-bot"
-          git config user.email "bot@twelvedata.com"
-          git add data/_state.json data/_corporate_actions.json 2>/dev/null || true
-          if [ -n "$(git diff --cached --name-only)" ]; then
-            git commit -m "chore: daily state $(date -u +'%Y-%m-%d')"
-            git push
-          fi
