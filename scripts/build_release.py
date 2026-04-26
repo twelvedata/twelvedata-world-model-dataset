@@ -42,6 +42,11 @@ def _load_features() -> list[str]:
 
 
 def main() -> int:
+    # Force line-buffered stdout so progress shows up live under tee /
+    # CI log redirection. Default is block-buffered when stdout isn't a
+    # tty, which makes long runs look frozen.
+    sys.stdout.reconfigure(line_buffering=True)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true",
                         help="Skip Hugging Face upload.")
@@ -158,9 +163,8 @@ def main() -> int:
     from tdwm.hf import (
         clear_repo_contents,
         load_hf_config,
+        push_config,
         push_dataset_card,
-        push_jsonl_config,
-        push_parquet_config,
     )
     hf_cfg = load_hf_config(REPO_ROOT / "config" / "hf.yaml")
 
@@ -186,7 +190,7 @@ def main() -> int:
         }
         configs_done += 1
         print(f"\n[push {configs_done}/{configs_total}] bars_{suffix}")
-        push_parquet_config(
+        push_config(
             hf_cfg["repo_id"], f"bars_{suffix}", bars_files,
             private=hf_cfg.get("private", True),
         )
@@ -196,7 +200,7 @@ def main() -> int:
         }
         configs_done += 1
         print(f"\n[push {configs_done}/{configs_total}] text_{suffix}")
-        push_jsonl_config(
+        push_config(
             hf_cfg["repo_id"], f"text_{suffix}", text_files,
             private=hf_cfg.get("private", True),
         )
@@ -206,7 +210,7 @@ def main() -> int:
         }
         configs_done += 1
         print(f"\n[push {configs_done}/{configs_total}] trajectories_{suffix}")
-        push_parquet_config(
+        push_config(
             hf_cfg["repo_id"], f"trajectories_{suffix}", traj_files,
             private=hf_cfg.get("private", True),
         )

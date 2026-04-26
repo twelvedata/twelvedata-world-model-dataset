@@ -87,11 +87,7 @@ def attach_macro(
             direction="backward",
             allow_exact_matches=True,
         )
-    else:
-        for c in ("spy_logret_1", "vix_level", "tlt_logret_1", "dxy_logret_1"):
-            out[c] = np.nan
 
-    # sector_logret_1
     if sector_etf and sector_etf in macros:
         sec = macros[sector_etf]
         sec_ret = _safe_logret(sec)
@@ -102,10 +98,8 @@ def attach_macro(
             {"datetime": sec_dt.dt.as_unit("us"), "sector_logret_1": sec_ret.values}
         ).sort_values("datetime")
         out = pd.merge_asof(out, sec_df, on="datetime", direction="backward")
-    else:
-        out["sector_logret_1"] = np.nan
 
-    # Make sure every macro column exists even if source was missing.
+    # Fill any macro column the merges didn't provide with NaN.
     for c in MACRO_COLUMNS:
         if c not in out.columns:
             out[c] = np.nan

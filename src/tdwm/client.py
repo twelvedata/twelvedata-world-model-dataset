@@ -118,19 +118,16 @@ class TDClient:
         if isinstance(df.index, pd.DatetimeIndex):
             df.index = df.index.tz_localize(None) if df.index.tz is None else df.index
             df = df.reset_index().rename(columns={"index": "datetime"})
-        # Lowercase column names.
         df.columns = [c.lower() for c in df.columns]
         if "datetime" not in df.columns and "date" in df.columns:
             df = df.rename(columns={"date": "datetime"})
-        # Ensure tz-aware in NY.
+        # Ensure tz-aware in NY (localize if naive, convert otherwise).
         df["datetime"] = pd.to_datetime(df["datetime"])
         if df["datetime"].dt.tz is None:
             df["datetime"] = df["datetime"].dt.tz_localize(req.timezone)
         else:
             df["datetime"] = df["datetime"].dt.tz_convert(req.timezone)
-        # Sort ascending.
         df = df.sort_values("datetime").reset_index(drop=True)
-        # Cast numeric columns.
         for c in ("open", "high", "low", "close", "volume"):
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")

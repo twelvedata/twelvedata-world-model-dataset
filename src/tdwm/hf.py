@@ -80,7 +80,7 @@ def _human_size(nbytes: int) -> str:
     return f"{nbytes/1024:.1f}KB"
 
 
-def _upload_split_files(
+def push_config(
     repo_id: str,
     config_name: str,
     split_files: dict[str, Path],
@@ -165,29 +165,3 @@ def push_dataset_card(
     )
 
 
-def push_parquet_config(
-    repo_id: str,
-    config_name: str,
-    split_files: dict[str, Path],
-    *,
-    private: bool = True,
-    token: str | None = None,
-) -> None:
-    _upload_split_files(
-        repo_id, config_name, split_files,
-        private=private, token=token,
-    )
-
-
-def push_jsonl_config(
-    repo_id: str,
-    config_name: str,
-    split_files: dict[str, Path],
-    *,
-    private: bool = True,
-    token: str | None = None,
-) -> None:
-    _upload_split_files(
-        repo_id, config_name, split_files,
-        private=private, token=token,
-    )

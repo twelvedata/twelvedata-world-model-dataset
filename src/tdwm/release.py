@@ -250,12 +250,10 @@ def stream_release_for_timeframe(
                 log(f"  [{i}/{n_sym}] {sym}: skip (no data)")
                 continue
 
-            # --- bars
             t_bars = time.perf_counter()
             bars_sink.add(df, split_cfg, allowed_splits=allowed)
             dt_bars = time.perf_counter() - t_bars
 
-            # --- text
             t_text = time.perf_counter()
             text_added = 0
             for row in textify_frame(df, verbose=True):
@@ -266,7 +264,6 @@ def stream_release_for_timeframe(
                 text_added += 1
             dt_text = time.perf_counter() - t_text
 
-            # --- trajectories (all configured windows)
             t_traj = time.perf_counter()
             traj_added = 0
             for w in windows:

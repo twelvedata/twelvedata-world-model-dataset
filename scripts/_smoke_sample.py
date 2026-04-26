@@ -44,7 +44,6 @@ def main() -> int:
     out_dir = Path(__file__).resolve().parents[1] / "examples"
     out_dir.mkdir(exist_ok=True)
 
-    # Trajectories.
     df = compute_all(make_df("DEMO", 42))
     trajs = build_trajectories(
         df,
@@ -55,7 +54,6 @@ def main() -> int:
         ],
         window=30, stride=10,
     )
-    # Keep the first 5 as samples.
     records = trajectories_to_records(trajs[:5])
     dest = out_dir / "sample_trajectories.jsonl"
     with open(dest, "w") as f:
@@ -63,7 +61,6 @@ def main() -> int:
             f.write(json.dumps(r) + "\n")
     print(f"wrote {dest} ({len(records)} trajectories)")
 
-    # Text sample.
     text_rows = textify_frame(df.iloc[-10:])
     from dataclasses import asdict
     dest_t = out_dir / "sample_text.jsonl"

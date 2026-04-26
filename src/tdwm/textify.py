@@ -18,66 +18,6 @@ import pandas as pd
 from .schema import TextRow
 
 
-def _fmt_num(x: float, digits: int = 2) -> str:
-    if x is None or (isinstance(x, float) and math.isnan(x)):
-        return "n/a"
-    return f"{x:.{digits}f}"
-
-
-def _fmt_pct(x: float, digits: int = 2) -> str:
-    if x is None or (isinstance(x, float) and math.isnan(x)):
-        return "n/a"
-    return f"{100 * x:+.{digits}f}%"
-
-
-def row_to_prompt(row: pd.Series, verbose: bool = True) -> str:
-    """Describe a single bar and its *already-observed* indicators.
-
-    Kept for backward compatibility; the vectorized `textify_frame`
-    reimplements this logic in bulk for speed.
-    """
-    when = pd.Timestamp(row["datetime"]).strftime("%Y-%m-%d %H:%M %Z") \
-        if getattr(row["datetime"], "tzinfo", None) is not None \
-        else pd.Timestamp(row["datetime"]).strftime("%Y-%m-%d")
-    base = (
-        f"On {when}, {row['symbol']} ({row['timeframe']}) opened at "
-        f"{_fmt_num(row['open'])}, reached a high of {_fmt_num(row['high'])}, "
-        f"a low of {_fmt_num(row['low'])}, and closed at "
-        f"{_fmt_num(row['close'])}. Volume: {_fmt_num(row['volume'], 0)}."
-    )
-    if not verbose:
-        return base
-    extras: list[str] = []
-    if "rsi_14" in row and pd.notna(row["rsi_14"]):
-        extras.append(f"RSI(14)={_fmt_num(row['rsi_14'])}")
-    if "macd" in row and pd.notna(row["macd"]):
-        extras.append(f"MACD={_fmt_num(row['macd'], 3)}")
-    if "rv_20" in row and pd.notna(row["rv_20"]):
-        extras.append(f"rv20={_fmt_num(row['rv_20'], 4)}")
-    if "bb_pctb" in row and pd.notna(row["bb_pctb"]):
-        extras.append(f"BB%b={_fmt_num(row['bb_pctb'], 2)}")
-    if "spy_logret_1" in row and pd.notna(row["spy_logret_1"]):
-        extras.append(f"SPY ret={_fmt_pct(row['spy_logret_1'])}")
-    if "vix_level" in row and pd.notna(row["vix_level"]):
-        extras.append(f"VIX={_fmt_num(row['vix_level'])}")
-    if extras:
-        return base + " Indicators: " + ", ".join(extras) + "."
-    return base
-
-
-def row_to_label(row: pd.Series, next_row: pd.Series | None) -> str:
-    """Next-step outcome string. `None` if no next row (end of series)."""
-    if next_row is None:
-        return ""
-    r = next_row.get("logret_1")
-    if pd.isna(r):
-        return ""
-    direction = "up" if r > 0 else ("down" if r < 0 else "flat")
-    return f"Next bar direction: {direction}. Next bar log return: {r:+.5f}."
-
-
-# ---------- bulk helpers (operate on numpy arrays, not Series) ----------
-
 def _fmt_num_array(arr: np.ndarray, digits: int) -> list[str]:
     """Format each float with fixed digits, "n/a" for NaN."""
     out = [""] * len(arr)
@@ -140,15 +80,16 @@ def textify_frame(
     dt_col = pd.to_datetime(df["datetime"])
     tz_aware = dt_col.dt.tz is not None
     if tz_aware:
-        # `%Z` triggers a per-element timezone-name lookup inside
-        # `tslib._format_native_types` that is pathologically slow on
-        # us-precision tz-aware series (10+ minutes for ~13k rows on
-        # some symbols, depending on stored dtype quirks). The tz is
-        # the same for every row in a single tz-aware Series, so format
-        # without %Z and append the IANA name once.
+        # pandas's strftime on a *tz-aware* DatetimeIndex routes through
+        # `tslib._format_native_types`, which formats one element at a
+        # time with a tz-name lookup per-row. On some us-precision
+        # series this hangs at 100% CPU for 10+ minutes (PEP daily).
+        # Stripping the tz first puts us on the bulk numpy strftime
+        # path, which formats the same 13k rows in ~10ms. The wall-
+        # clock values are unchanged; we append the IANA name once.
         tz_name = str(dt_col.dt.tz)
-        formatted = dt_col.dt.strftime("%Y-%m-%d %H:%M").tolist()
-        when = [f"{f} {tz_name}" for f in formatted]
+        naive = dt_col.dt.tz_localize(None)
+        when = (naive.dt.strftime("%Y-%m-%d %H:%M") + " " + tz_name).tolist()
     else:
         when = dt_col.dt.strftime("%Y-%m-%d").tolist()
     # `.isoformat()` matches the legacy "+HH:MM" offset style that
