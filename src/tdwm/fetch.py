@@ -147,12 +147,11 @@ def fetch_macro(
     start: str | None = None,
     end: str | None = None,
 ) -> dict[str, pd.DataFrame]:
+    # Fail fast on macro fetch errors: a missing macro silently shifts
+    # equity rows to use the previous day's macro values via merge_asof,
+    # which is locked in once the equity's last_known advances past the
+    # affected date. Investigate manually rather than corrupting bars.
     out: dict[str, pd.DataFrame] = {}
     for sym in macro_symbols:
-        try:
-            out[sym] = fetch_symbol_history(client, sym, tf, start=start, end=end)
-        except Exception as exc:  # noqa: BLE001
-            # Macro gaps are not fatal — log and continue.
-            print(f"[warn] macro fetch failed for {sym}: {exc}")
-            out[sym] = pd.DataFrame(columns=["datetime", "open", "high", "low", "close", "volume"])
+        out[sym] = fetch_symbol_history(client, sym, tf, start=start, end=end)
     return out

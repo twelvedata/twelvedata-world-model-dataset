@@ -92,18 +92,27 @@ def main() -> int:
         print(f"[update] wrote {FULL_REBUILD_MARKER.name}: full rebuild scheduled")
 
     for tf in tfs:
-        # We need macro history going back to the earliest equity last_known
-        # so that merge_asof has something to match. Compute min(last_known)
-        # across equities for this timeframe.
+        # Macro history must cover EVERY equity's write window in this
+        # run, otherwise attach_macro's merge_asof produces NaN (or worse,
+        # stale yesterday-values) on rows where macro_frame is shallower
+        # than the bars being written. Take the deeper of:
+        #   - min(last_known) - 5d, for incremental equities
+        #   - backfill_window.start, if any equity has no state and will
+        #     do a full historical pull (new symbol, or post corporate-
+        #     action clear).
         per_sym_last = {
             sym: state.get_last(tf.interval, sym) for sym in equities
         }
         valid_lasts = [v for v in per_sym_last.values() if v is not None]
+        needs_full_backfill = any(v is None for v in per_sym_last.values())
+        candidates: list[str] = []
         if valid_lasts:
-            macro_start = (min(valid_lasts) - pd.Timedelta(days=5)).date().isoformat()
-        else:
-            # No state → fall back to full history.
-            macro_start, _ = tdfetch.backfill_window(tf)
+            candidates.append(
+                (min(valid_lasts) - pd.Timedelta(days=5)).date().isoformat()
+            )
+        if needs_full_backfill:
+            candidates.append(tdfetch.backfill_window(tf)[0])
+        macro_start = min(candidates)
         macro_end = datetime.now(timezone.utc).date().isoformat()
         print(f"[update] {tf.interval}: macro window {macro_start}..{macro_end}")
         # Macro caching: only fetch tail that's missing, then persist.
@@ -156,7 +165,7 @@ def main() -> int:
             from tdwm.storage import read_bars
             existing = read_bars(DATA_ROOT, timeframe=tf.interval, symbol=sym)
             if not existing.empty:
-                # Drop rows we're about to replace (last 3 days of existing)
+                # Drop existing rows that overlap the re-fetched window.
                 cutoff = pd.Timestamp(raw["datetime"].iloc[0])
                 existing = existing.loc[pd.to_datetime(existing["datetime"]) < cutoff]
                 # Stored rows already carry macro columns from their
