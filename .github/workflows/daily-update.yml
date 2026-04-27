@@ -52,6 +52,16 @@ jobs:
           [ -n "$INPUT_TIMEFRAMES" ] && EXTRA="$EXTRA --timeframes $INPUT_TIMEFRAMES"
           .venv/bin/python scripts/update_daily.py $EXTRA
 
+      - name: Integrity check (gates HF push)
+        env:
+          INPUT_SYMBOLS: ${{ github.event.inputs.symbols }}
+          INPUT_TIMEFRAMES: ${{ github.event.inputs.timeframes }}
+        run: |
+          EXTRA=""
+          [ -n "$INPUT_SYMBOLS" ] && EXTRA="$EXTRA --symbols $INPUT_SYMBOLS"
+          [ -n "$INPUT_TIMEFRAMES" ] && EXTRA="$EXTRA --timeframes $INPUT_TIMEFRAMES"
+          .venv/bin/python scripts/check_integrity.py $EXTRA
+
       - name: Build and push release
         if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         env:
