@@ -9,12 +9,11 @@ Tier 1 (gating; exits 1 on any hit):
   - OHLCV / close_adj NaN on a row
   - High/low sanity violations (high < low/open/close, low > open/close)
   - Negative open/high/low/close/volume
-  - Macro column NaN on a row dated >= the first cached datetime where
-    the column can be non-NaN: the macro's first cached bar for level
-    columns (e.g. vix_level), the second for logret columns (logret_1
-    on the first cached bar is NaN by construction since there's no
-    prior price to diff against). Catches the corruption fixed in
-    fetch.py / update_daily.py.
+  - Macro column NaN on a row dated >= that macro symbol's earliest
+    cached datetime — i.e. we had macro data, but attach_macro left
+    the row empty anyway (the corruption fixed in fetch.py /
+    update_daily.py). Logret columns (`*_logret_1`) use strict `>`
+    since the first cached bar's logret is NaN by construction.
 
 Tier 2 (warnings; do not gate):
   - Calendar-day gap between consecutive bars exceeds a per-timeframe cap
@@ -50,25 +49,11 @@ DEFAULT_MACRO_MAP = {
 }
 
 
-def macro_inception(
-    tf: str, sym: str
-) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
-    """Return (level_inception, logret_inception).
-
-    logret_1 = log(close).diff() is NaN on the first cached bar by
-    definition, so the first datetime where a logret column can be
-    non-NaN is the second cached bar — not the first.
-    """
+def macro_inception(tf: str, sym: str) -> pd.Timestamp | None:
     df = read_macro(DATA_ROOT, tf, sym)
     if df.empty:
-        return None, None
-    level = pd.Timestamp(df["datetime"].iloc[0])
-    logret = pd.Timestamp(df["datetime"].iloc[1]) if len(df) >= 2 else None
-    return level, logret
-
-
-def _col_kind(col: str) -> str:
-    return "logret" if col.endswith("_logret_1") else "level"
+        return None
+    return pd.Timestamp(df["datetime"].iloc[0])
 
 
 def _align_tz(ts: pd.Timestamp, ref: pd.Series) -> pd.Timestamp:
@@ -85,7 +70,7 @@ def check_symbol(
     tf: str,
     sym: str,
     sector_etf: str | None,
-    macro_inceptions: dict[str, tuple[pd.Timestamp | None, pd.Timestamp | None]],
+    macro_inceptions: dict[str, pd.Timestamp | None],
 ) -> tuple[list[str], list[str]]:
     t1: list[str] = []
     t2: list[str] = []
@@ -128,8 +113,7 @@ def check_symbol(
     for col, macro_sym in macros_to_check.items():
         if col not in df.columns:
             continue
-        level_incep, logret_incep = macro_inceptions.get(macro_sym, (None, None))
-        inception = logret_incep if _col_kind(col) == "logret" else level_incep
+        inception = macro_inceptions.get(macro_sym)
         if inception is None:
             continue
         inception = _align_tz(inception, dt)
@@ -199,7 +183,7 @@ def main() -> int:
         macro_syms = set(DEFAULT_MACRO_MAP.values())
         macro_syms.update(v for v in sectors.values() if v)
         inceptions = {s: macro_inception(tf.interval, s) for s in macro_syms}
-        missing_inc = [s for s, v in inceptions.items() if v[0] is None]
+        missing_inc = [s for s, v in inceptions.items() if v is None]
         if missing_inc:
             print(
                 f"[check] {tf.interval}: no macro cache for "
