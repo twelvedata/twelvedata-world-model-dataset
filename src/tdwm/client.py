@@ -131,4 +131,13 @@ class TDClient:
         for c in ("open", "high", "low", "close", "volume"):
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
+        # TD occasionally returns close slightly above high or below low
+        # (sub-bp rounding noise from the source pipeline). high must
+        # dominate {open, low, close} from above and low must dominate
+        # them from below — without this, downstream OHLC sanity checks
+        # fail on rows that are otherwise fine.
+        if {"open", "high", "low", "close"}.issubset(df.columns):
+            ohlc = df[["open", "high", "low", "close"]]
+            df["high"] = ohlc.max(axis=1)
+            df["low"] = ohlc.min(axis=1)
         return df

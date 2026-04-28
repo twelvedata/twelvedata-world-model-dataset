@@ -61,6 +61,15 @@ def build_macro_frame(
     if not parts:
         return pd.DataFrame(columns=["datetime", *MACRO_COLUMNS])
     macro = pd.concat(parts, axis=1).sort_index()
+    # On 1min, individual macros (esp. VIXY, UUP) have minutes where no
+    # bar printed. The concat's union index has NaN cells for those gaps
+    # in just the affected column. Without ffill, attach_macro's
+    # merge_asof finds the exact-match row and returns NaN for that
+    # column even though a fully-valid prior bar exists. Forward-fill
+    # per column so each macro independently carries its last known
+    # value across gaps; merge_asof then picks up the right at-or-before
+    # value for every column at every equity row.
+    macro = macro.ffill()
     macro.index.name = "datetime"
     return macro.reset_index()
 
