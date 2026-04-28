@@ -115,7 +115,15 @@ def check_symbol(
         if inception is None:
             continue
         inception = _align_tz(inception, dt)
-        post = dt >= inception
+        # Logret cols are np.log(close).diff() — the very first bar of
+        # the macro series is intrinsically NaN, so the equity row at
+        # exactly inception correctly carries NaN. Strict `>` skips
+        # that artifact for return columns; level columns (vix_level)
+        # use `>=` so we still flag a missing inception-day value.
+        if col.endswith("_logret_1"):
+            post = dt > inception
+        else:
+            post = dt >= inception
         nan_post = post & df[col].isna()
         n_nan_post = int(nan_post.sum())
         if n_nan_post:
