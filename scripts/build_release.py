@@ -41,6 +41,30 @@ def _load_features() -> list[str]:
     return list(cfg["trajectory_state"])
 
 
+def _render_card(card_path: Path, release_root: Path) -> Path:
+    """Substitute placeholders in the dataset card and write to release_root.
+
+    Currently substitutes `{TEST_END_DATE}` with the max `datetime` in the
+    1day test parquet (formatted YYYY-MM-DD). Falls back to "latest
+    available" if the parquet isn't on disk yet (e.g. card-only push
+    before any build has run on this machine).
+    """
+    import pandas as pd  # local: keep top-level imports light
+
+    test_parquet = release_root / "bars" / "1day" / "test.parquet"
+    if test_parquet.exists():
+        last = pd.read_parquet(test_parquet, columns=["datetime"])["datetime"].max()
+        end_str = pd.Timestamp(last).strftime("%Y-%m-%d")
+    else:
+        end_str = "latest available"
+
+    text = card_path.read_text().replace("{TEST_END_DATE}", end_str)
+    rendered = release_root / "README.md"
+    rendered.parent.mkdir(parents=True, exist_ok=True)
+    rendered.write_text(text)
+    return rendered
+
+
 def main() -> int:
     # Force line-buffered stdout so progress shows up live under tee /
     # CI log redirection. Default is block-buffered when stdout isn't a
@@ -126,9 +150,10 @@ def main() -> int:
         if not card_path.exists():
             print(f"[error] no dataset card at {card_path}")
             return 1
+        rendered = _render_card(card_path, RELEASE_ROOT)
         print("[push] dataset card (README.md)")
         push_dataset_card(
-            hf_cfg["repo_id"], card_path,
+            hf_cfg["repo_id"], rendered,
             private=hf_cfg.get("private", True),
         )
         return 0
@@ -219,9 +244,10 @@ def main() -> int:
 
     card_path = REPO_ROOT / "config" / "dataset_card.md"
     if card_path.exists():
+        rendered = _render_card(card_path, RELEASE_ROOT)
         print("\n[push] dataset card (README.md)")
         push_dataset_card(
-            hf_cfg["repo_id"], card_path,
+            hf_cfg["repo_id"], rendered,
             private=hf_cfg.get("private", True),
         )
     else:

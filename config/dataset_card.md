@@ -112,7 +112,7 @@ train / validation / test splits.
 | --- | --- |
 | `train` | up to 2023-12-31 |
 | `validation` | 2024-01-01 → 2024-12-31 |
-| `test` | 2025-01-01 → latest available |
+| `test` | 2025-01-01 → {TEST_END_DATE} |
 
 Splits are assigned by timestamp. For `trajectories_*`, a window is dropped if
 it crosses a split boundary (so train and val never overlap). Datetimes are
