@@ -125,7 +125,7 @@ Consumer, Industrials/Energy/Materials, Communication). Macro context tickers
 (SPY, QQQ, VIXY, TLT, sector SPDRs, etc.) are joined as columns onto every
 equity row — they are not first-class trainable symbols.
 
-See [`config/symbols.yaml`](https://github.com/) in the source repo for the
+See [`config/symbols.yaml`](https://github.com/twelvedata/twelvedata-world-model-dataset/blob/main/config/symbols.yaml) in the source repo for the
 exact list.
 
 ## Timeframes
