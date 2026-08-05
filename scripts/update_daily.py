@@ -30,7 +30,13 @@ from tdwm.enrich import attach_macro, build_macro_frame                  # noqa:
 from tdwm.indicators import compute_all                                  # noqa: E402
 from tdwm.schema import MACRO_COLUMNS                                    # noqa: E402
 from tdwm.state import State                                             # noqa: E402
-from tdwm.storage import last_macro_datetime, read_macro, write_bars, write_macro  # noqa: E402
+from tdwm.storage import (                                                      # noqa: E402
+    last_macro_datetime,
+    read_bars,
+    read_macro,
+    write_bars,
+    write_macro,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -61,10 +67,11 @@ def main() -> int:
 
     syms_cfg = tdfetch.load_symbols()
     sectors = tdfetch.load_sectors()
-    tfs = tdfetch.load_timeframes()
+    all_tfs = tdfetch.load_timeframes()
+    tfs = all_tfs
     if args.timeframes:
         wanted = set(_parse_csv(args.timeframes) or [])
-        tfs = [tf for tf in tfs if tf.interval in wanted]
+        tfs = [tf for tf in all_tfs if tf.interval in wanted]
 
     equities = _parse_csv(args.symbols) or syms_cfg["equities"]
     macros = syms_cfg["macro"]
@@ -81,8 +88,9 @@ def main() -> int:
     for sym in dirty:
         print(f"[update] {sym}: clearing stored bars due to corporate action")
         clear_symbol_bars(DATA_ROOT, sym)
-        # Clear state so the equity loop does a full re-backfill.
-        for tf in tfs:
+        # Bars are wiped across EVERY timeframe; clear state for all of
+        # them even if this run only processes a --timeframes subset.
+        for tf in all_tfs:
             state.entries.pop(State.key(tf.interval, sym), None)
     if dirty:
         state.save(STATE_PATH)
@@ -100,9 +108,23 @@ def main() -> int:
         #   - backfill_window.start, if any equity has no state and will
         #     do a full historical pull (new symbol, or post corporate-
         #     action clear).
-        per_sym_last = {
-            sym: state.get_last(tf.interval, sym) for sym in equities
-        }
+        # Self-heal: state without on-disk bars (e.g. CA clear under a
+        # --timeframes subset) must full-backfill, not incremental-tail.
+        per_sym_last: dict[str, object] = {}
+        for sym in equities:
+            last = state.get_last(tf.interval, sym)
+            if last is not None:
+                existing = read_bars(DATA_ROOT, timeframe=tf.interval, symbol=sym)
+                if existing.empty:
+                    print(
+                        f"[update] {sym} {tf.interval}: "
+                        "state present but no bars → full history"
+                    )
+                    state.entries.pop(State.key(tf.interval, sym), None)
+                    last = None
+            per_sym_last[sym] = last
+        if any(v is None for v in per_sym_last.values()):
+            state.save(STATE_PATH)
         valid_lasts = [v for v in per_sym_last.values() if v is not None]
         needs_full_backfill = any(v is None for v in per_sym_last.values())
         candidates: list[str] = []
@@ -162,7 +184,6 @@ def main() -> int:
             # incremental window, we need history too. Pull existing
             # rows, merge, recompute indicators on the combined frame,
             # then write (storage dedupes).
-            from tdwm.storage import read_bars
             existing = read_bars(DATA_ROOT, timeframe=tf.interval, symbol=sym)
             if not existing.empty:
                 # Drop existing rows that overlap the re-fetched window.
