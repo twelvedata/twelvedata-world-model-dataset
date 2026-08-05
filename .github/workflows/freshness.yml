@@ -1,0 +1,39 @@
+name: Freshness check
+
+# Runs after the daily-update window. A failure here is the only signal for
+# "the job stopped running at all" — GitHub's failure emails cannot catch that.
+on:
+  schedule:
+    - cron: '0 12 * * 2-6'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install -q huggingface_hub pyarrow pyyaml
+
+      - name: Check published bars
+        run: python scripts/check_hf_freshness.py
+
+      # GitHub disables scheduled workflows after 60 days without commits;
+      # green Actions runs do not count. This commit keeps that timer from
+      # ever expiring. Pushes made with GITHUB_TOKEN do not trigger workflows.
+      - name: Heartbeat commit
+        run: |
+          date -u +%Y-%m-%dT%H:%M:%SZ > metadata/last_verified.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add metadata/last_verified.txt
+          git commit -m "chore: freshness heartbeat $(date -u +%Y-%m-%d)"
+          git push origin HEAD:main
