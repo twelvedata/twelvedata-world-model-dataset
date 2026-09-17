@@ -97,6 +97,19 @@ def test_multiple_events_same_symbol(tmp_path: Path) -> None:
     assert dirty == {"AAPL"}
 
 
+def test_plan_403_stops_after_first_symbol(tmp_path: Path) -> None:
+    sdk = MagicMock()
+    boom = MagicMock()
+    boom.as_json.side_effect = RuntimeError(
+        '{"code":403,"message":"/splits is available exclusively with grow","status":"error"}'
+    )
+    sdk.get_splits.return_value = boom
+    dirty = check_corporate_actions(sdk, ["AAPL", "MSFT", "NVDA"], tmp_path)
+    assert dirty == set()
+    assert sdk.get_splits.call_count == 1
+    assert sdk.get_dividends.call_count == 0
+
+
 # ---------------------------------------------------------------------------
 # clear_symbol_bars
 # ---------------------------------------------------------------------------

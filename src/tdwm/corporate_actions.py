@@ -18,6 +18,8 @@ from typing import Any
 
 import pandas as pd
 
+from .client import api_status_code
+
 
 _SEEN_FILE = "_corporate_actions.json"
 
@@ -73,6 +75,8 @@ def _fetch_splits(sdk: Any, symbol: str, start_date: str, end_date: str) -> list
         return _extract_dates(payload, "splits", ("date",))
     except Exception as exc:  # noqa: BLE001
         print(f"  [warn] splits fetch failed for {symbol}: {exc}")
+        if api_status_code(exc) == 403:
+            raise
         return []
 
 
@@ -87,6 +91,8 @@ def _fetch_dividends(sdk: Any, symbol: str, start_date: str, end_date: str) -> l
         return _extract_dates(payload, "dividends", ("ex_date", "date"))
     except Exception as exc:  # noqa: BLE001
         print(f"  [warn] dividends fetch failed for {symbol}: {exc}")
+        if api_status_code(exc) == 403:
+            raise
         return []
 
 
@@ -121,7 +127,18 @@ def check_corporate_actions(
         sym_seen = set(seen.get(sym, []))
         new_events: list[str] = []
 
-        splits = _fetch_splits(sdk, sym, start_date=start, end_date=today)
+        try:
+            splits = _fetch_splits(sdk, sym, start_date=start, end_date=today)
+            dividends = _fetch_dividends(sdk, sym, start_date=start, end_date=today)
+        except Exception as exc:  # noqa: BLE001
+            if api_status_code(exc) == 403:
+                print(
+                    "  [warn] /splits and /dividends are not on this API plan "
+                    "(403). Skipping remaining corporate-action checks."
+                )
+                break
+            splits, dividends = [], []
+
         for d in splits:
             key = f"split:{d}"
             if key not in sym_seen:
@@ -129,7 +146,6 @@ def check_corporate_actions(
                 new_events.append(key)
                 dirty.add(sym)
 
-        dividends = _fetch_dividends(sdk, sym, start_date=start, end_date=today)
         for d in dividends:
             key = f"dividend:{d}"
             if key not in sym_seen:

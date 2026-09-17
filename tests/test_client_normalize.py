@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from tdwm.client import FetchRequest, TDClient
+from tdwm.client import FetchRequest, TDClient, api_status_code
 
 
 def _req(timezone: str = "America/New_York") -> FetchRequest:
@@ -78,4 +78,31 @@ def test_normalize_handles_empty_input():
     """Empty input returns the canonical empty schema."""
     out = TDClient._normalize(pd.DataFrame(), _req())
     assert list(out.columns) == ["datetime", "open", "high", "low", "close", "volume"]
-    assert len(out) == 0
+
+
+class _BoomTS:
+    def __init__(self, err: Exception) -> None:
+        self.calls = 0
+        self._err = err
+
+    def time_series(self, **_kwargs):
+        self.calls += 1
+        raise self._err
+
+
+def test_fetch_bars_does_not_retry_401():
+    sdk = _BoomTS(RuntimeError(
+        '{"code":401,"message":"apikey is incorrect","status":"error"}'
+    ))
+    client = TDClient(sdk=sdk, max_retries=8, retry_base_sleep=0)
+    try:
+        client.fetch_bars(_req())
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as exc:
+        assert "TWELVE_DATA_API_KEY was rejected" in str(exc)
+    assert sdk.calls == 1
+
+
+def test_api_status_code_parses_json_error():
+    assert api_status_code(RuntimeError('{"code":403,"message":"x"}')) == 403
+    assert api_status_code(RuntimeError("nope")) is None

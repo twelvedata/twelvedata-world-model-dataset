@@ -7,12 +7,25 @@ inject a fake client with the same surface area.
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Iterable
 
 import pandas as pd
+
+# Twelve Data: retry only 429/5xx. 401 is a dead key, 403 is a plan
+# restriction — backing off just burns the job clock (the Sep 2026
+# outage spent ~5 min on 8 retries of the same 401).
+_NON_RETRYABLE_CODES = {400, 401, 403, 404}
+_CODE_RE = re.compile(r'"code"\s*:\s*(\d+)')
+
+
+def api_status_code(exc: BaseException) -> int | None:
+    m = _CODE_RE.search(str(exc))
+    return int(m.group(1)) if m else None
+
 
 # Load .env from repo root if present (no third-party dep required).
 _env_file = Path(__file__).resolve().parents[2] / ".env"
@@ -88,7 +101,19 @@ class TDClient:
                     # Expected when requesting history past a symbol's
                     # inception — not retryable.
                     raise
-                if "run out of API credits" in msg:
+                code = api_status_code(exc)
+                if code in _NON_RETRYABLE_CODES:
+                    if code == 401:
+                        raise RuntimeError(
+                            "TWELVE_DATA_API_KEY was rejected (401). "
+                            "Update the GitHub Actions secret and re-run. "
+                            f"Last error: {exc}"
+                        ) from exc
+                    raise RuntimeError(
+                        f"fetch_bars got HTTP {code} for "
+                        f"{req.symbol} {req.interval}: {exc}"
+                    ) from exc
+                if "run out of API credits" in msg or code == 429:
                     print(f"  [rate-limit] sleeping 60s before retry (attempt {attempt + 1})")
                     time.sleep(60)
                 else:
