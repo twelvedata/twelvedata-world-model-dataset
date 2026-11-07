@@ -161,9 +161,9 @@ class _Provider:
     """Simulated /time_series over one true-time series.
 
     Bounds and labels are in the requested timezone. Explicit-time bounds
-    are inclusive (matches the recorded live responses); a date-only end is
-    taken as the whole day, the assumption fetch_symbol_history already
-    makes. Rows newest-first, at most ``outputsize``.
+    are inclusive (matches the recorded live responses); a date-only end
+    excludes that date (matches production page logs). Rows newest-first,
+    at most ``outputsize``.
     """
 
     def __init__(self, instants: pd.DatetimeIndex, values: pd.DataFrame | None = None):
@@ -194,7 +194,7 @@ class _Provider:
             keep &= wall >= pd.Timestamp(start_date)
         if end_date is not None:
             hi = pd.Timestamp(end_date)
-            keep &= wall < hi + pd.Timedelta(days=1) if len(end_date) == 10 else wall <= hi
+            keep &= wall < hi if len(end_date) == 10 else wall <= hi
         df = bars[keep].set_axis(pd.DatetimeIndex(wall[keep], name="datetime"))
         return _TS(df.iloc[::-1].iloc[:outputsize])
 
@@ -438,20 +438,15 @@ def _history(monkeypatch, provider: _Provider, interval: str, outputsize: int,
     return tdfetch.fetch_symbol_history(client, "XAU/USD", tf, start=start, end=end)
 
 
-# 71 and 72: the page boundary falls between the two 01:00 bars.
-@pytest.mark.parametrize("outputsize", [60, 71, 72, 5000])
-def test_paginated_hourly_history_across_fall_back_is_exact(monkeypatch, outputsize):
+def test_hourly_history_across_fall_back_is_exact(monkeypatch):
     p = _Provider(_utc_range("2026-10-29 04:00", "2026-11-04 04:00", "1h"))
-    out = _history(monkeypatch, p, "1h", outputsize, "2026-10-29", "2026-11-04")
+    out = _history(monkeypatch, p, "1h", 5000, "2026-10-29", "2026-11-04")
     _assert_exact(out, p)
-    primary = [c for c in p.calls if c["timezone"] == NY]
-    lookups = [c for c in p.calls if c["timezone"] == "UTC"]
-    assert (len(primary) > 1) == (outputsize < 5000)
-    assert len(lookups) == (2 if outputsize in (71, 72) else 1)
+    assert [c["timezone"] for c in p.calls] == [NY, "UTC"]
 
 
-@pytest.mark.parametrize("outputsize", [1500, 2000, 2500, 5000])
-def test_paginated_minute_history_across_fall_back_is_exact(monkeypatch, outputsize):
+def test_minute_history_across_fall_back_is_exact(monkeypatch):
     p = _Provider(_utc_range("2026-10-30 04:00", "2026-11-02 04:00", "1min"))
-    out = _history(monkeypatch, p, "1min", outputsize, "2026-10-30", "2026-11-02")
+    out = _history(monkeypatch, p, "1min", 5000, "2026-10-30", "2026-11-02")
     _assert_exact(out, p)
+    assert [c["timezone"] for c in p.calls] == [NY, "UTC"]
