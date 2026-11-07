@@ -8,6 +8,8 @@ datasets>=2.18
 huggingface_hub>=0.23
 tqdm>=4.66
 python-dateutil>=2.9
+# transitive via datasets / huggingface_hub; <4.2.1 has known CVEs
+filelock>=4.2.1
 # optional: charts
 plotly>=5.20
 kaleido>=0.2.1
