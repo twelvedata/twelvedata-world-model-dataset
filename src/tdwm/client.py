@@ -130,6 +130,11 @@ class TDClient:
                     timezone=req.timezone,
                 )
                 df = ts.as_pandas()
+                return self._normalize(df, req)
+            except AmbiguousTimestampError:
+                # Deterministic for a given payload; retrying only burns the
+                # job clock.
+                raise
             except Exception as exc:  # noqa: BLE001
                 last_err = exc
                 msg = str(exc)
@@ -154,10 +159,6 @@ class TDClient:
                     time.sleep(60)
                 else:
                     time.sleep(self.retry_base_sleep * (2**attempt))
-            else:
-                # Outside the retry handler: a bad payload is deterministic,
-                # so re-requesting it only burns the job clock.
-                return self._normalize(df, req)
         raise RuntimeError(
             f"fetch_bars failed after {self.max_retries} retries for "
             f"{req.symbol} {req.interval}: {last_err}"

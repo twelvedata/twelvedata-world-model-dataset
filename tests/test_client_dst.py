@@ -9,6 +9,7 @@ API's newest-first row order.
 """
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -182,21 +183,107 @@ def test_fetch_bars_resolves_fall_back_through_the_client():
     assert sdk.calls == 1
 
 
-@pytest.mark.parametrize("exc_name", ["ambiguous", "nonexistent"])
-def test_unresolvable_timestamps_are_not_retried(exc_name):
-    if exc_name == "ambiguous":
-        idx = pd.DatetimeIndex(["2026-11-01 01:00", "2026-11-01 00:00"], name="datetime")
-    else:
-        idx = pd.DatetimeIndex(["2026-03-08 02:30", "2026-03-08 01:30"], name="datetime")
-    frame = pd.DataFrame(
-        {"open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 10.0}, index=idx
+def _flat_frame(stamps: list[str]) -> pd.DataFrame:
+    return pd.DataFrame(
+        {"open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 10.0},
+        index=pd.DatetimeIndex(stamps, name="datetime"),
     )
-    sdk = _FakeSDK(frame)
+
+
+def test_unresolvable_ambiguity_is_not_retried():
+    sdk = _FakeSDK(_flat_frame(["2026-11-01 01:00", "2026-11-01 00:00"]))
     client = TDClient(sdk=sdk, max_retries=8, retry_base_sleep=0)
-    with pytest.raises(Exception) as err:
+    with pytest.raises(AmbiguousTimestampError):
         client.fetch_bars(_req())
-    assert "failed after" not in str(err.value)
     assert sdk.calls == 1
+
+
+def test_other_normalization_errors_keep_existing_retry_behavior():
+    # Nonexistent spring-forward time: unchanged from before this fix.
+    sdk = _FakeSDK(_flat_frame(["2026-03-08 02:30", "2026-03-08 01:30"]))
+    client = TDClient(sdk=sdk, max_retries=3, retry_base_sleep=0)
+    with pytest.raises(RuntimeError, match="failed after 3 retries"):
+        client.fetch_bars(_req())
+    assert sdk.calls == 3
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_illiquid_one_minute_overlap_resolves_exactly(seed):
+    # Random 40% of minutes missing in either pass of the repeated hour.
+    full = _utc_range("2026-11-01 04:30", "2026-11-01 07:30", "1min")
+    rng = np.random.default_rng(seed)
+    keep = np.sort(rng.choice(len(full), size=int(len(full) * 0.6), replace=False))
+    instants = full[keep]
+    out = TDClient._normalize(_td_frame(instants), _req("1min"))
+    _assert_exact(out, instants)
+
+
+@pytest.mark.parametrize(
+    ("first", "last", "descending"),
+    [
+        # No bars in the EDT pass of 01:xx: each 01:xx wall time occurs once.
+        ("2026-11-01 06:00", "2026-11-01 07:30", True),
+        # Frame lies entirely inside the overlap and the passes do not share
+        # a wall time, so row order cannot establish the offsets.
+        ("2026-11-01 05:30", "2026-11-01 06:10", True),
+        ("2026-11-01 05:30", "2026-11-01 06:10", False),
+    ],
+)
+def test_overlap_without_repeated_wall_times_is_rejected(first, last, descending):
+    instants = _utc_range(first, last, "1min")
+    with pytest.raises(AmbiguousTimestampError):
+        TDClient._normalize(_td_frame(instants, descending=descending), _req("1min"))
+
+
+class _PagedSDK:
+    """Date-only start/end as NY wall dates (end inclusive), newest rows
+    first, at most ``outputsize`` rows per call."""
+
+    def __init__(self, frame: pd.DataFrame) -> None:
+        self.frame = frame
+        self.calls = 0
+
+    def time_series(self, *, start_date, end_date, outputsize, **_kwargs):
+        self.calls += 1
+        lo = pd.Timestamp(start_date)
+        hi = pd.Timestamp(end_date) + pd.Timedelta(days=1)
+        f = self.frame
+        page = f[(f.index >= lo) & (f.index < hi)].iloc[:outputsize]
+
+        class _TS:
+            @staticmethod
+            def as_pandas():
+                return page.copy()
+
+        return _TS()
+
+
+def _paged_history(monkeypatch, instants, outputsize, start, end):
+    real = tdfetch.FetchRequest
+    monkeypatch.setattr(
+        tdfetch, "FetchRequest", lambda **kw: real(**{**kw, "outputsize": outputsize})
+    )
+    sdk = _PagedSDK(_td_frame(instants))
+    client = TDClient(sdk=sdk, max_retries=1, retry_base_sleep=0)
+    tf = tdfetch.TimeframeCfg(
+        interval="1h", enabled=True, history_years=100, trajectory_windows=[]
+    )
+    return tdfetch.fetch_symbol_history(client, "XAU/USD", tf, start=start, end=end), sdk
+
+
+def test_paginated_history_across_fall_back_is_exact(monkeypatch):
+    instants = _utc_range("2026-10-29 04:00", "2026-11-04 04:00", "1h")
+    out, sdk = _paged_history(monkeypatch, instants, 60, "2026-10-29", "2026-11-04")
+    assert sdk.calls > 1
+    assert out["datetime"].dt.tz_convert("UTC").tolist() == list(instants)
+    assert out["close"].tolist() == [float(i) for i in range(len(instants))]
+
+
+def test_page_boundary_inside_repeated_hour_fails_closed(monkeypatch):
+    # 47 newest rows end between the two 01:00 bars.
+    instants = _utc_range("2026-10-29 04:00", "2026-11-04 04:00", "1h")
+    with pytest.raises(AmbiguousTimestampError):
+        _paged_history(monkeypatch, instants, 47, "2026-10-29", "2026-11-04")
 
 
 def test_fetch_symbol_history_keeps_both_fall_back_bars():
