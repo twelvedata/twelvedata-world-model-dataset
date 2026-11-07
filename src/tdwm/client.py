@@ -27,6 +27,43 @@ def api_status_code(exc: BaseException) -> int | None:
     return int(m.group(1)) if m else None
 
 
+class AmbiguousTimestampError(RuntimeError):
+    """Naive wall-clock timestamps that cannot be mapped to one UTC instant."""
+
+
+def _localize_naive(dt: pd.Series, req: FetchRequest) -> pd.Series:
+    """Localize naive wall-clock datetimes to ``req.timezone``.
+
+    Unambiguous input is localized exactly as ``tz_localize`` would. During
+    a DST fall-back hour the same wall time occurs twice, so the offset can
+    only come from row order: with both occurrences present in time order
+    the first is the pre-transition (DST) instant, the second the
+    post-transition one. If that cannot be established the rows are
+    rejected rather than dropped or guessed.
+    """
+    localized = dt.dt.tz_localize(req.timezone, ambiguous="NaT")
+    if localized.isna().sum() == dt.isna().sum():
+        return localized
+
+    valid = dt.dropna()
+    descending = bool(valid.iloc[0] > valid.iloc[-1])
+    ordered = dt.iloc[::-1] if descending else dt
+    ambiguous = dt[localized.isna() & dt.notna()].drop_duplicates()
+    sample = ", ".join(str(t) for t in ambiguous.head(3))
+    failure = AmbiguousTimestampError(
+        f"{req.symbol} {req.interval}: ambiguous DST wall-clock timestamps in "
+        f"{req.timezone} ({sample}) could not be resolved from row order; "
+        "refusing to drop or guess offsets"
+    )
+    try:
+        resolved = ordered.dt.tz_localize(req.timezone, ambiguous="infer")
+    except Exception as exc:  # pandas 2.x raises pytz errors, 3.x ValueError
+        raise failure from exc
+    if not (resolved.is_monotonic_increasing and resolved.is_unique):
+        raise failure
+    return resolved.iloc[::-1] if descending else resolved
+
+
 # Load .env from repo root if present (no third-party dep required).
 _env_file = Path(__file__).resolve().parents[2] / ".env"
 if _env_file.exists():
@@ -93,7 +130,6 @@ class TDClient:
                     timezone=req.timezone,
                 )
                 df = ts.as_pandas()
-                return self._normalize(df, req)
             except Exception as exc:  # noqa: BLE001
                 last_err = exc
                 msg = str(exc)
@@ -118,6 +154,10 @@ class TDClient:
                     time.sleep(60)
                 else:
                     time.sleep(self.retry_base_sleep * (2**attempt))
+            else:
+                # Outside the retry handler: a bad payload is deterministic,
+                # so re-requesting it only burns the job clock.
+                return self._normalize(df, req)
         raise RuntimeError(
             f"fetch_bars failed after {self.max_retries} retries for "
             f"{req.symbol} {req.interval}: {last_err}"
@@ -149,7 +189,7 @@ class TDClient:
         # Ensure tz-aware in NY (localize if naive, convert otherwise).
         df["datetime"] = pd.to_datetime(df["datetime"])
         if df["datetime"].dt.tz is None:
-            df["datetime"] = df["datetime"].dt.tz_localize(req.timezone)
+            df["datetime"] = _localize_naive(df["datetime"], req)
         else:
             df["datetime"] = df["datetime"].dt.tz_convert(req.timezone)
         df = df.sort_values("datetime").reset_index(drop=True)
