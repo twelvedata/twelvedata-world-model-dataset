@@ -450,3 +450,24 @@ def test_minute_history_across_fall_back_is_exact(monkeypatch):
     out = _history(monkeypatch, p, "1min", 5000, "2026-10-30", "2026-11-02")
     _assert_exact(out, p)
     assert [c["timezone"] for c in p.calls] == [NY, "UTC"]
+
+
+def test_every_hourly_page_size_across_fall_back_is_exact(monkeypatch):
+    # Page sizes larger than the 25-bar fall-back day; some put a page
+    # boundary inside the repeated hour, so each page needs its own lookup.
+    split_hour = 0
+    for outputsize in range(26, 160):
+        p = _Provider(_utc_range("2026-10-29 04:00", "2026-11-04 04:00", "1h"))
+        with monkeypatch.context() as mp:
+            out = _history(mp, p, "1h", outputsize, "2026-10-29", "2026-11-04")
+        _assert_exact(out, p)
+        split_hour += sum(c["timezone"] == "UTC" for c in p.calls) > 1
+    assert split_hour
+
+
+@pytest.mark.parametrize("outputsize", [1500, 2000, 2500, 3000, 4000])
+def test_paginated_minute_history_across_fall_back_is_exact(monkeypatch, outputsize):
+    p = _Provider(_utc_range("2026-10-30 04:00", "2026-11-02 04:00", "1min"))
+    out = _history(monkeypatch, p, "1min", outputsize, "2026-10-30", "2026-11-02")
+    _assert_exact(out, p)
+    assert sum(c["timezone"] == NY for c in p.calls) > 1
