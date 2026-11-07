@@ -11,6 +11,7 @@ import re
 import time
 from pathlib import Path
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any, Iterable
 
 import pandas as pd
@@ -25,6 +26,90 @@ _CODE_RE = re.compile(r'"code"\s*:\s*(\d+)')
 def api_status_code(exc: BaseException) -> int | None:
     m = _CODE_RE.search(str(exc))
     return int(m.group(1)) if m else None
+
+
+class AmbiguousTimestampError(RuntimeError):
+    """Naive wall-clock timestamps that cannot be mapped to one UTC instant."""
+
+
+_VALUE_COLUMNS = ("open", "high", "low", "close", "volume")
+
+# Fetches bars for an inclusive UTC instant range, normalized (tz-aware).
+FoldLookup = Callable[[pd.Timestamp, pd.Timestamp], pd.DataFrame]
+
+
+def _value_keys(df: pd.DataFrame, cols: list[str]) -> list[tuple]:
+    return [
+        tuple(None if pd.isna(v) else float(v) for v in row)
+        for row in df[cols].itertuples(index=False)
+    ]
+
+
+def _resolve_folds(
+    df: pd.DataFrame, localized: pd.Series, req: FetchRequest, lookup: FoldLookup | None
+) -> pd.Series:
+    """Assign UTC instants to naive wall-clock rows in a DST fall-back hour.
+
+    Labels in the repeated hour carry no offset and a sparse series may hold
+    only one of the two passes, so neither the label nor row order identifies
+    the instant. The instants come from a UTC-labelled request over the
+    repeated hour instead: every ambiguous row must match, by its full set of
+    values, UTC bars with that same wall-clock label. Anything short of an
+    unambiguous match raises rather than dropping or guessing.
+    """
+    amb = localized.isna() & df["datetime"].notna()
+    labels = df.loc[amb, "datetime"]
+    sample = ", ".join(str(t) for t in labels.drop_duplicates().head(3))
+
+    def failure(reason: str) -> AmbiguousTimestampError:
+        return AmbiguousTimestampError(
+            f"{req.symbol} {req.interval}: ambiguous DST wall-clock timestamps in "
+            f"{req.timezone} ({sample}): {reason}; refusing to drop or guess offsets"
+        )
+
+    if lookup is None:
+        raise failure("no UTC reference available")
+    # One bounded request per transition day, spanning both passes.
+    refs = []
+    for _, day in labels.groupby(labels.dt.date):
+        first = day.min().tz_localize(req.timezone, ambiguous=True).tz_convert("UTC")
+        last = day.max().tz_localize(req.timezone, ambiguous=False).tz_convert("UTC")
+        ref_day = lookup(first, last)
+        if not ref_day.empty:
+            refs.append(ref_day)
+    if not refs:
+        raise failure("UTC reference returned no bars")
+    ref = pd.concat(refs, ignore_index=True)
+    ref_wall = ref["datetime"].dt.tz_convert(req.timezone).dt.tz_localize(None)
+
+    cols = [c for c in _VALUE_COLUMNS if c in df.columns]
+    if cols != [c for c in _VALUE_COLUMNS if c in ref.columns]:
+        raise failure("UTC reference has different value columns")
+    rows = df.loc[amb]
+    row_key = dict(zip(rows.index, _value_keys(rows, cols)))
+    ref_keys = _value_keys(ref, cols)
+    resolved = localized.copy()
+    for label in labels.drop_duplicates():
+        by_key: dict[tuple, list[int]] = {}
+        for i in range(len(ref)):
+            if ref_wall.iloc[i] == label:
+                by_key.setdefault(ref_keys[i], []).append(i)
+        mine: dict[tuple, list] = {}
+        for pos in rows.index[(rows["datetime"] == label).to_numpy()]:
+            mine.setdefault(row_key[pos], []).append(pos)
+        for key, positions in mine.items():
+            matches = by_key.get(key, [])
+            # Equal counts make value-identical bars interchangeable; any other
+            # count means a bar is missing upstream or cannot be told apart.
+            if len(matches) != len(positions):
+                raise failure(
+                    f"{len(positions)} bar(s) at {label} match {len(matches)} UTC bar(s)"
+                )
+            for pos, i in zip(positions, matches):
+                resolved.loc[pos] = ref["datetime"].iloc[i].tz_convert(req.timezone)
+    if not resolved.dropna().is_unique:
+        raise failure("resolved instants are not unique")
+    return resolved
 
 
 # Load .env from repo root if present (no third-party dep required).
@@ -93,7 +178,13 @@ class TDClient:
                     timezone=req.timezone,
                 )
                 df = ts.as_pandas()
-                return self._normalize(df, req)
+                return self._normalize(
+                    df, req, lambda first, last: self._utc_reference(req, first, last)
+                )
+            except AmbiguousTimestampError:
+                # Deterministic for a given payload; retrying only burns the
+                # job clock.
+                raise
             except Exception as exc:  # noqa: BLE001
                 last_err = exc
                 msg = str(exc)
@@ -131,9 +222,50 @@ class TDClient:
 
     # --- internal ---
 
+    def _utc_reference(
+        self, req: FetchRequest, first: pd.Timestamp, last: pd.Timestamp
+    ) -> pd.DataFrame:
+        """Bars for ``first..last`` (UTC instants), requested with UTC labels.
+
+        Explicit-time bounds are inclusive at both ends, and with
+        ``timezone=UTC`` they and the returned labels are UTC.
+        """
+        ref_req = FetchRequest(
+            symbol=req.symbol,
+            interval=req.interval,
+            start=first.strftime("%Y-%m-%dT%H:%M:%S"),
+            end=last.strftime("%Y-%m-%dT%H:%M:%S"),
+            outputsize=req.outputsize,
+            timezone="UTC",
+        )
+        try:
+            ts = self._sdk.time_series(
+                symbol=ref_req.symbol,
+                interval=ref_req.interval,
+                start_date=ref_req.start,
+                end_date=ref_req.end,
+                outputsize=ref_req.outputsize,
+                timezone=ref_req.timezone,
+            )
+            df = ts.as_pandas()
+        except Exception as exc:
+            # Must not reach fetch_symbol_history, which reads this message
+            # as the end of the symbol's history.
+            if "No data is available" in str(exc):
+                return pd.DataFrame(columns=["datetime", *_VALUE_COLUMNS])
+            raise
+        return self._normalize(df, ref_req)
+
     @staticmethod
-    def _normalize(df: pd.DataFrame, req: FetchRequest) -> pd.DataFrame:
-        """Return a DataFrame with a canonical shape regardless of SDK version."""
+    def _normalize(
+        df: pd.DataFrame, req: FetchRequest, fold_lookup: FoldLookup | None = None
+    ) -> pd.DataFrame:
+        """Return a DataFrame with a canonical shape regardless of SDK version.
+
+        ``fold_lookup`` supplies UTC-labelled bars used to place naive
+        timestamps that fall in a DST fall-back hour; without it such rows
+        raise ``AmbiguousTimestampError``.
+        """
         if df is None or len(df) == 0:
             return pd.DataFrame(
                 columns=["datetime", "open", "high", "low", "close", "volume"]
@@ -146,14 +278,7 @@ class TDClient:
         df.columns = [c.lower() for c in df.columns]
         if "datetime" not in df.columns and "date" in df.columns:
             df = df.rename(columns={"date": "datetime"})
-        # Ensure tz-aware in NY (localize if naive, convert otherwise).
-        df["datetime"] = pd.to_datetime(df["datetime"])
-        if df["datetime"].dt.tz is None:
-            df["datetime"] = df["datetime"].dt.tz_localize(req.timezone)
-        else:
-            df["datetime"] = df["datetime"].dt.tz_convert(req.timezone)
-        df = df.sort_values("datetime").reset_index(drop=True)
-        for c in ("open", "high", "low", "close", "volume"):
+        for c in _VALUE_COLUMNS:
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
         # TD occasionally returns close slightly above high or below low
@@ -165,4 +290,13 @@ class TDClient:
             ohlc = df[["open", "high", "low", "close"]]
             df["high"] = ohlc.max(axis=1)
             df["low"] = ohlc.min(axis=1)
-        return df
+        # Ensure tz-aware in NY (localize if naive, convert otherwise).
+        df["datetime"] = pd.to_datetime(df["datetime"])
+        if df["datetime"].dt.tz is None:
+            localized = df["datetime"].dt.tz_localize(req.timezone, ambiguous="NaT")
+            if localized.isna().sum() != df["datetime"].isna().sum():
+                localized = _resolve_folds(df, localized, req, fold_lookup)
+            df["datetime"] = localized
+        else:
+            df["datetime"] = df["datetime"].dt.tz_convert(req.timezone)
+        return df.sort_values("datetime").reset_index(drop=True)
