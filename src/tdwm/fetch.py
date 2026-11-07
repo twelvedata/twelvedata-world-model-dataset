@@ -87,14 +87,15 @@ def fetch_symbol_history(
     interval_delta = timedelta(minutes=_INTERVAL_MINUTES.get(tf.interval, 1440))
 
     chunks: list[pd.DataFrame] = []
-    chunk_end = end_dt
+    end_date = end_dt.date()
+    prev_earliest: pd.Timestamp | None = None
 
-    while chunk_end > start_dt:
+    while end_dt > start_dt:  # constant: the loop ends via break or raise
         req = FetchRequest(
             symbol=symbol,
             interval=tf.interval,
             start=start_dt.date().isoformat(),
-            end=chunk_end.date().isoformat(),
+            end=end_date.isoformat(),
             outputsize=5000,
         )
         try:
@@ -125,9 +126,17 @@ def fetch_symbol_history(
                 reason = "window complete"
             print(f"  [page] {symbol} {tf.interval}: got {len(chunk)} rows ({reason})")
             break
-        # Step back one interval before the earliest bar we got.
-        chunk_end = earliest - interval_delta
-        print(f"  [page] {symbol} {tf.interval}: got {len(chunk)} rows, next end={chunk_end.date()}")
+        if prev_earliest is not None and earliest >= prev_earliest:
+            raise RuntimeError(
+                f"pagination stalled for {symbol} {tf.interval} at {earliest}: "
+                f"one day holds at least {req.outputsize} bars"
+            )
+        prev_earliest = earliest
+        # A date-only end_date excludes that date, so end the next page on
+        # the following day: it must re-cover the bars of the earliest bar's
+        # day that precede it. The overlap is deduplicated below.
+        end_date = earliest.date() + timedelta(days=1)
+        print(f"  [page] {symbol} {tf.interval}: got {len(chunk)} rows, next end={end_date}")
 
     if not chunks:
         return pd.DataFrame(columns=["datetime", "open", "high", "low", "close", "volume"])
