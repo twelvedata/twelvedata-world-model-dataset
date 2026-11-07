@@ -138,7 +138,8 @@ twelvedata-world-model-dataset/
 The updater is **idempotent and gap-aware**: each run requests `last_known - 2
 days → today`, so a single run automatically catches up however many days
 were missed. It also always re-fetches the previous trading day to capture
-late prints and corporate-action restatements.
+late prints. A detected split or dividend clears that symbol's stored bars
+and refetches history, so past rows can change between releases.
 
 ## Design choices (and why)
 
@@ -149,13 +150,16 @@ late prints and corporate-action restatements.
 - **Prompt / label separation.** Textified rows never describe the future
   inside the `prompt` field. Next-bar return lives only in `label`, so you
   can concatenate safely for instruction tuning.
-- **Adjusted + raw both shipped.** Split/dividend-adjusted series is the
-  default (column `close_adj`); raw `close` is kept so downstream can
-  recompute if desired.
-- **Restatement handling.** The updater re-fetches the previous trading
-  day every run; corporate-action detection in [src/tdwm/corporate_actions.py](src/tdwm/corporate_actions.py)
-  triggers a per-symbol re-backfill when a new split/dividend appears, so
-  historical `close_adj` stays consistent.
+- **Price adjustment.** `close_adj` is a copy of `close`, not a separately
+  adjusted series. Daily bars use Twelve Data’s default split adjustment;
+  no separate dividend adjustment is applied. Intraday bars (`1h`, `1min`)
+  are unadjusted.
+- **Historical updates.** The updater refetches history when corporate
+  actions are detected
+  ([src/tdwm/corporate_actions.py](src/tdwm/corporate_actions.py)), so past
+  rows can change between releases. This is not a point-in-time record of
+  what was known on each date. Pin a specific Hugging Face revision for
+  reproducible results.
 - **Partitioned storage.** Parquet is partitioned by
   `timeframe/symbol/year`, so daily appends touch exactly one file per
   symbol-year.

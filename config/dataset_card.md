@@ -156,7 +156,12 @@ bar for one symbol at one timeframe.
 | `timeframe` | string | `1day`, `1h`, or `1min` |
 | `open`, `high`, `low`, `close` | float64 | OHLC prices |
 | `volume` | float64 | traded volume |
-| `close_adj` | float64 | split- and dividend-adjusted close (== `close` when no events) |
+| `close_adj` | float64 | copy of `close`, not a separately adjusted series |
+
+**Price adjustment.** `close_adj` is a copy of `close`, not a separately
+adjusted series. Daily bars use Twelve Data’s default split adjustment; no
+separate dividend adjustment is applied. Intraday bars (`1h`, `1min`) are
+unadjusted. `open`, `high`, `low`, and `close` are that same series.
 
 ### Returns
 | column | description |
@@ -283,11 +288,16 @@ LIMIT 10;
 The dataset is rebuilt by an incremental pipeline that:
 
 1. Fetches the trailing window per symbol/timeframe (re-fetches the previous
-   day to capture restatements).
-2. Detects splits and dividends and triggers a per-symbol re-backfill when
-   needed (so `close_adj` stays correct historically).
+   day to capture late prints).
+2. Detects splits and dividends and refetches that symbol's history when one
+   is found.
 3. Recomputes indicators and macro joins.
 4. Re-emits all three views and pushes them here.
+
+**Historical updates.** The updater refetches history when corporate actions
+are detected, so past rows can change between releases. This is not a
+point-in-time record of what was known on each date. Pin a specific Hugging
+Face revision for reproducible results.
 
 ## Limitations
 
